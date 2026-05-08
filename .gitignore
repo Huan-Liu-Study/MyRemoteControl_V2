@@ -1,0 +1,9 @@
+build/
+build-qt/
+*.exe
+*.pdb
+*.ilk
+*.obj
+*.zip
+*.user
+*.tmp
