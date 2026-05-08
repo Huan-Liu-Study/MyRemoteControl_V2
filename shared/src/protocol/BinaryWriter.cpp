@@ -1,25 +1,36 @@
 #include "protocol/BinaryWriter.h"
 
 #include <cstring>
+#include <winsock2.h>
+
+void BinaryWriter::writeUint16(uint16_t value)
+{
+    uint16_t networkValue = htons(value);
+    writeBytes(reinterpret_cast<const uint8_t*>(&networkValue), sizeof(networkValue));
+}
 
 void BinaryWriter::writeUint32(uint32_t value)
 {
-    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&value);
-    buffer_.insert(buffer_.end(), bytes, bytes + sizeof(value));
+    uint32_t networkValue = htonl(value);
+    writeBytes(reinterpret_cast<const uint8_t*>(&networkValue), sizeof(networkValue));
 }
 
 void BinaryWriter::writeUint64(uint64_t value)
 {
-    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&value);
-    buffer_.insert(buffer_.end(), bytes, bytes + sizeof(value));
+    writeUint32(static_cast<uint32_t>(value >> 32));
+    writeUint32(static_cast<uint32_t>(value & 0xFFFFFFFFu));
+}
+
+void BinaryWriter::writeBytes(const uint8_t* data, size_t length)
+{
+    buffer_.insert(buffer_.end(), data, data + length);
 }
 
 void BinaryWriter::writeString(const std::string& text)
 {
     writeUint32(static_cast<uint32_t>(text.size()));
 
-    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(text.data());
-    buffer_.insert(buffer_.end(), bytes, bytes + text.size());
+    writeBytes(reinterpret_cast<const uint8_t*>(text.data()), text.size());
 }
 
 const ByteBuffer& BinaryWriter::buffer() const

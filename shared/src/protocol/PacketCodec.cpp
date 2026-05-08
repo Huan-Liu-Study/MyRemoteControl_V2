@@ -2,6 +2,9 @@
 
 #include <cstring>
 
+#include "protocol/BinaryReader.h"
+#include "protocol/BinaryWriter.h"
+
 #include <windows.h>
 #include <wincrypt.h>
 
@@ -30,15 +33,10 @@ ByteBuffer PacketCodec::pack(CMD::Type command, const ByteBuffer& payload)
         xorCrypt(encryptedPayload);
     }
 
-    ByteBuffer fullPacket(totalLen);
-    std::memcpy(fullPacket.data(), &header, PACKET_HEADER_SIZE);
+    ByteBuffer fullPacket = encodeHeader(header);
 
     if (!encryptedPayload.empty()) {
-        std::memcpy(
-            fullPacket.data() + PACKET_HEADER_SIZE,
-            encryptedPayload.data(),
-            encryptedPayload.size()
-        );
+        fullPacket.insert(fullPacket.end(), encryptedPayload.begin(), encryptedPayload.end());
     }
 
     return fullPacket;
@@ -47,6 +45,27 @@ ByteBuffer PacketCodec::pack(CMD::Type command, const ByteBuffer& payload)
 ByteBuffer PacketCodec::pack(CMD::Type command, const std::string& text)
 {
     return pack(command, stringToBytes(text));
+}
+
+bool PacketCodec::decodeHeader(const ByteBuffer& bytes, PacketHeader& outHeader)
+{
+    if (bytes.size() != PACKET_HEADER_SIZE) {
+        return false;
+    }
+
+    BinaryReader reader(bytes);
+    uint16_t command = 0;
+
+    if (!reader.readUint16(outHeader.signature)
+        || !reader.readUint32(outHeader.length)
+        || !reader.readUint16(command)
+        || !reader.readBytes(outHeader.md5_hash, sizeof(outHeader.md5_hash))
+        || !reader.isFinished()) {
+        return false;
+    }
+
+    outHeader.command = static_cast<CMD::Type>(command);
+    return true;
 }
 
 bool PacketCodec::unpack(const PacketHeader& header, const ByteBuffer& payload, ParsedPacket& outPacket)
@@ -78,6 +97,16 @@ bool PacketCodec::unpack(const PacketHeader& header, const ByteBuffer& payload, 
     outPacket.header = header;
     outPacket.payload = decryptedPayload;
     return true;
+}
+
+ByteBuffer PacketCodec::encodeHeader(const PacketHeader& header)
+{
+    BinaryWriter writer;
+    writer.writeUint16(header.signature);
+    writer.writeUint32(header.length);
+    writer.writeUint16(static_cast<uint16_t>(header.command));
+    writer.writeBytes(header.md5_hash, sizeof(header.md5_hash));
+    return writer.buffer();
 }
 
 void PacketCodec::xorCrypt(ByteBuffer& data)

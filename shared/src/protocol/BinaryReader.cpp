@@ -1,31 +1,55 @@
 #include "protocol/BinaryReader.h"
 
 #include <cstring>
+#include <winsock2.h>
 
 BinaryReader::BinaryReader(const ByteBuffer& buffer)
     : buffer_(buffer)
 {
 }
 
-bool BinaryReader::readUint32(uint32_t& outValue)
+bool BinaryReader::readUint16(uint16_t& outValue)
 {
-    if (offset_ + sizeof(uint32_t) > buffer_.size()) {
+    uint16_t networkValue = 0;
+    if (!readBytes(reinterpret_cast<uint8_t*>(&networkValue), sizeof(networkValue))) {
         return false;
     }
 
-    std::memcpy(&outValue, buffer_.data() + offset_, sizeof(uint32_t));
-    offset_ += sizeof(uint32_t);
+    outValue = ntohs(networkValue);
+    return true;
+}
+
+bool BinaryReader::readUint32(uint32_t& outValue)
+{
+    uint32_t networkValue = 0;
+    if (!readBytes(reinterpret_cast<uint8_t*>(&networkValue), sizeof(networkValue))) {
+        return false;
+    }
+
+    outValue = ntohl(networkValue);
     return true;
 }
 
 bool BinaryReader::readUint64(uint64_t& outValue)
 {
-    if (offset_ + sizeof(uint64_t) > buffer_.size()) {
+    uint32_t high = 0;
+    uint32_t low = 0;
+    if (!readUint32(high) || !readUint32(low)) {
         return false;
     }
 
-    std::memcpy(&outValue, buffer_.data() + offset_, sizeof(uint64_t));
-    offset_ += sizeof(uint64_t);
+    outValue = (static_cast<uint64_t>(high) << 32) | low;
+    return true;
+}
+
+bool BinaryReader::readBytes(uint8_t* outData, size_t length)
+{
+    if (offset_ + length > buffer_.size()) {
+        return false;
+    }
+
+    std::memcpy(outData, buffer_.data() + offset_, length);
+    offset_ += length;
     return true;
 }
 

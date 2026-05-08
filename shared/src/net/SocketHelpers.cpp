@@ -55,8 +55,13 @@ bool sendPacket(SOCKET sock, CMD::Type command, const std::string& text)
 
 bool recvPacket(SOCKET sock, ParsedPacket& outPacket)
 {
+    ByteBuffer headerBytes(PACKET_HEADER_SIZE);
+    if (!recvAll(sock, reinterpret_cast<char*>(headerBytes.data()), static_cast<int>(headerBytes.size()))) {
+        return false;
+    }
+
     PacketHeader header{};
-    if (!recvAll(sock, reinterpret_cast<char*>(&header), static_cast<int>(PACKET_HEADER_SIZE))) {
+    if (!PacketCodec::decodeHeader(headerBytes, header)) {
         return false;
     }
 

@@ -22,9 +22,11 @@ public:
     static ByteBuffer pack(CMD::Type command, const ByteBuffer& payload = {});
     static ByteBuffer pack(CMD::Type command, const std::string& text);
 
+    static bool decodeHeader(const ByteBuffer& bytes, PacketHeader& outHeader);
     static bool unpack(const PacketHeader& header, const ByteBuffer& payload, ParsedPacket& outPacket);
 
 private:
+    static ByteBuffer encodeHeader(const PacketHeader& header);
     static void xorCrypt(ByteBuffer& data);
     static void calculateMD5(const ByteBuffer& data, uint8_t outHash[16]);
 };
