@@ -1,17 +1,17 @@
 #include "protocol/BinaryWriter.h"
 
+#include <winsock2.h>
+
 void BinaryWriter::writeUint16(uint16_t value)
 {
-    buffer_.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
-    buffer_.push_back(static_cast<uint8_t>(value & 0xFF));
+    uint16_t networkValue = htons(value);
+    writeBytes(reinterpret_cast<const uint8_t*>(&networkValue), sizeof(networkValue));
 }
 
 void BinaryWriter::writeUint32(uint32_t value)
 {
-    buffer_.push_back(static_cast<uint8_t>((value >> 24) & 0xFF));
-    buffer_.push_back(static_cast<uint8_t>((value >> 16) & 0xFF));
-    buffer_.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
-    buffer_.push_back(static_cast<uint8_t>(value & 0xFF));
+    uint32_t networkValue = htonl(value);
+    writeBytes(reinterpret_cast<const uint8_t*>(&networkValue), sizeof(networkValue));
 }
 
 void BinaryWriter::writeUint64(uint64_t value)

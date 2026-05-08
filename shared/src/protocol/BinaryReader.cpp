@@ -1,6 +1,7 @@
 #include "protocol/BinaryReader.h"
 
 #include <cstring>
+#include <winsock2.h>
 
 BinaryReader::BinaryReader(const ByteBuffer& buffer)
     : buffer_(buffer)
@@ -9,27 +10,23 @@ BinaryReader::BinaryReader(const ByteBuffer& buffer)
 
 bool BinaryReader::readUint16(uint16_t& outValue)
 {
-    if (offset_ + sizeof(uint16_t) > buffer_.size()) {
+    uint16_t networkValue = 0;
+    if (!readBytes(reinterpret_cast<uint8_t*>(&networkValue), sizeof(networkValue))) {
         return false;
     }
 
-    outValue = (static_cast<uint16_t>(buffer_[offset_]) << 8)
-        | static_cast<uint16_t>(buffer_[offset_ + 1]);
-    offset_ += sizeof(uint16_t);
+    outValue = ntohs(networkValue);
     return true;
 }
 
 bool BinaryReader::readUint32(uint32_t& outValue)
 {
-    if (offset_ + sizeof(uint32_t) > buffer_.size()) {
+    uint32_t networkValue = 0;
+    if (!readBytes(reinterpret_cast<uint8_t*>(&networkValue), sizeof(networkValue))) {
         return false;
     }
 
-    outValue = (static_cast<uint32_t>(buffer_[offset_]) << 24)
-        | (static_cast<uint32_t>(buffer_[offset_ + 1]) << 16)
-        | (static_cast<uint32_t>(buffer_[offset_ + 2]) << 8)
-        | static_cast<uint32_t>(buffer_[offset_ + 3]);
-    offset_ += sizeof(uint32_t);
+    outValue = ntohl(networkValue);
     return true;
 }
 
