@@ -4,6 +4,7 @@
 
 #include "handlers/DriveHandler.h"
 #include "handlers/FileHandler.h"
+#include "handlers/InputHandler.h"
 #include "net/SocketHelpers.h"
 #include "protocol/Command.h"
 
@@ -22,6 +23,21 @@ bool dispatchCommand(SOCKET clientSock, const ParsedPacket& request)
     if (request.header.command == CMD::CMD_DOWNLOAD_START) {
         std::cout << "Received CMD_DOWNLOAD_START command." << std::endl;
         return handleDownloadStart(clientSock, request.payload);
+    }
+
+    if (request.header.command == CMD::CMD_MOUSE_MOVE) {
+        std::cout << "Received CMD_MOUSE_MOVE command." << std::endl;
+        return handleMouseMove(clientSock, request.payload);
+    }
+
+    if (request.header.command == CMD::CMD_MOUSE_CLICK) {
+        std::cout << "Received CMD_MOUSE_CLICK command." << std::endl;
+        return handleMouseClick(clientSock, request.payload);
+    }
+
+    if (request.header.command == CMD::CMD_MOUSE_POSITION) {
+        std::cout << "Received CMD_MOUSE_POSITION command." << std::endl;
+        return handleMousePosition(clientSock);
     }
 
     std::cout << "Received unknown command: " << request.header.command << std::endl;

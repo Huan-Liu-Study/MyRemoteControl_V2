@@ -4,7 +4,7 @@
 #include <QString>
 #include <QStringList>
 
-using RemoteSocket = unsigned long long;
+#include "core/RemoteClientCore.h"
 
 class RemoteClientWorker : public QObject {
     Q_OBJECT
@@ -30,9 +30,7 @@ signals:
     void requestFinished();
 
 private:
-    bool receiveAndEmitResponse();
     bool isConnected() const;
 
-    RemoteSocket socket_ = 0;
-    bool wsaStarted_ = false;
+    RemoteClientCore client_;
 };

@@ -6,6 +6,8 @@
 
 #include "protocol/PacketCodec.h"
 
+// Protocol strings are encoded as UTF-8 byte strings.
+
 struct DriveListResponse {
     std::vector<std::string> drives;
 };
@@ -34,6 +36,21 @@ struct DownloadStartResponse {
     std::string errorMessage;
 };
 
+struct MouseMoveRequest {
+    int32_t x;
+    int32_t y;
+};
+
+struct MouseClickRequest {
+    uint32_t button;
+    uint32_t action;
+};
+
+struct MousePositionResponse {
+    int32_t x;
+    int32_t y;
+};
+
 
 
 ByteBuffer serializeDriveListResponse(const DriveListResponse& response);
@@ -50,3 +67,12 @@ bool deserializeDownloadStartRequest(const ByteBuffer& payload, DownloadStartReq
 
 ByteBuffer serializeDownloadStartResponse(const DownloadStartResponse& response);
 bool deserializeDownloadStartResponse(const ByteBuffer& payload, DownloadStartResponse& outResponse);
+
+ByteBuffer serializeMouseMoveRequest(const MouseMoveRequest& request);
+bool deserializeMouseMoveRequest(const ByteBuffer& payload, MouseMoveRequest& outRequest);
+
+ByteBuffer serializeMouseClickRequest(const MouseClickRequest& request);
+bool deserializeMouseClickRequest(const ByteBuffer& payload, MouseClickRequest& outRequest);
+
+ByteBuffer serializeMousePositionResponse(const MousePositionResponse& response);
+bool deserializeMousePositionResponse(const ByteBuffer& payload, MousePositionResponse& outResponse);

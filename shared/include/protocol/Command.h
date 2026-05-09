@@ -9,6 +9,10 @@ namespace CMD {
         CMD_DOWNLOAD_START = 103,
         CMD_DOWNLOAD_CHUNK = 104,
         CMD_DOWNLOAD_END   = 105,
+
+        CMD_MOUSE_MOVE  = 201,
+        CMD_MOUSE_CLICK = 202,
+        CMD_MOUSE_POSITION = 203,
         
         CMD_ERROR        = 999
     };

@@ -27,12 +27,14 @@ add_executable(RemoteServer
     server/src/handlers/CommandDispatcher.cpp
     server/src/handlers/DriveHandler.cpp
     server/src/handlers/FileHandler.cpp
+    server/src/handlers/InputHandler.cpp
     ${SHARED_SOURCES}
 )
 
 add_executable(RemoteClient
     client/src/console/main.cpp
     client/src/console/ConsoleClient.cpp
+    client/src/core/RemoteClientCore.cpp
     ${SHARED_SOURCES}
 )
 
@@ -44,8 +46,10 @@ if(Qt6_FOUND)
         client/src/qt/qt_main.cpp
         client/src/qt/MainWindow.cpp
         client/src/qt/RemoteClientWorker.cpp
+        client/src/core/RemoteClientCore.cpp
         client/include/qt/MainWindow.h
         client/include/qt/RemoteClientWorker.h
+        client/include/core/RemoteClientCore.h
         ${SHARED_SOURCES}
     )
 

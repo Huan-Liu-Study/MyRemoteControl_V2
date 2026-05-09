@@ -1,5 +1,7 @@
 #include "protocol/BinaryWriter.h"
 
+#include <limits>
+#include <stdexcept>
 #include <winsock2.h>
 
 void BinaryWriter::writeUint16(uint16_t value)
@@ -27,6 +29,10 @@ void BinaryWriter::writeBytes(const uint8_t* data, size_t length)
 
 void BinaryWriter::writeString(const std::string& text)
 {
+    if (text.size() > (std::numeric_limits<uint32_t>::max)()) {
+        throw std::length_error("String is too large to serialize.");
+    }
+
     writeUint32(static_cast<uint32_t>(text.size()));
 
     writeBytes(reinterpret_cast<const uint8_t*>(text.data()), text.size());

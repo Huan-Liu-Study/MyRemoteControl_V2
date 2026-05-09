@@ -14,37 +14,101 @@
 
 namespace {
 
-std::vector<FileEntry> getDirectoryEntries(const std::string& path)
+std::wstring utf8ToWide(const std::string& text)
+{
+    if (text.empty()) {
+        return {};
+    }
+
+    int size = MultiByteToWideChar(
+        CP_UTF8,
+        MB_ERR_INVALID_CHARS,
+        text.data(),
+        static_cast<int>(text.size()),
+        nullptr,
+        0
+    );
+    if (size <= 0) {
+        return {};
+    }
+
+    std::wstring result(static_cast<size_t>(size), L'\0');
+    MultiByteToWideChar(
+        CP_UTF8,
+        MB_ERR_INVALID_CHARS,
+        text.data(),
+        static_cast<int>(text.size()),
+        result.data(),
+        size
+    );
+    return result;
+}
+
+std::string wideToUtf8(const std::wstring& text)
+{
+    if (text.empty()) {
+        return {};
+    }
+
+    int size = WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        text.data(),
+        static_cast<int>(text.size()),
+        nullptr,
+        0,
+        nullptr,
+        nullptr
+    );
+    if (size <= 0) {
+        return {};
+    }
+
+    std::string result(static_cast<size_t>(size), '\0');
+    WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        text.data(),
+        static_cast<int>(text.size()),
+        result.data(),
+        size,
+        nullptr,
+        nullptr
+    );
+    return result;
+}
+
+std::vector<FileEntry> getDirectoryEntries(const std::wstring& path)
 {
     std::vector<FileEntry> entries;
 
-    std::string searchPath = path;
+    std::wstring searchPath = path;
     if (searchPath.empty()) {
         return entries;
     }
 
-    if (searchPath.back() != '\\' && searchPath.back() != '/') {
-        searchPath += "\\";
+    if (searchPath.back() != L'\\' && searchPath.back() != L'/') {
+        searchPath += L"\\";
     }
-    searchPath += "*";
+    searchPath += L"*";
 
-    WIN32_FIND_DATAA findData{};
-    HANDLE hFind = FindFirstFileA(searchPath.c_str(), &findData);
+    WIN32_FIND_DATAW findData{};
+    HANDLE hFind = FindFirstFileW(searchPath.c_str(), &findData);
     if (hFind == INVALID_HANDLE_VALUE) {
         return entries;
     }
 
     do {
-        std::string name = findData.cFileName;
-        if (name == "." || name == "..") {
+        std::wstring name = findData.cFileName;
+        if (name == L"." || name == L"..") {
             continue;
         }
 
         FileEntry entry{};
-        entry.name = std::move(name);
+        entry.name = wideToUtf8(name);
         entry.isDirectory = (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? 1u : 0u;
         entries.push_back(std::move(entry));
-    } while (FindNextFileA(hFind, &findData));
+    } while (FindNextFileW(hFind, &findData));
 
     FindClose(hFind);
     return entries;
@@ -69,8 +133,13 @@ bool handleListDirectory(SOCKET clientSock, const ByteBuffer& requestPayload)
         return sendPacket(clientSock, CMD::CMD_ERROR, "Invalid list directory request.");
     }
 
+    std::wstring path = utf8ToWide(request.path);
+    if (path.empty()) {
+        return sendPacket(clientSock, CMD::CMD_ERROR, "Invalid UTF-8 directory path.");
+    }
+
     ListDirResponse response{};
-    response.entries = getDirectoryEntries(request.path);
+    response.entries = getDirectoryEntries(path);
 
     return sendPacket(clientSock, CMD::CMD_LIST_DIR, serializeListDirResponse(response));
 }
@@ -86,19 +155,26 @@ bool handleDownloadStart(SOCKET clientSock, const ByteBuffer& requestPayload)
         return sendDownloadStartError(clientSock, "Path is empty.");
     }
 
+    std::wstring widePath = utf8ToWide(request.path);
+    if (widePath.empty()) {
+        return sendDownloadStartError(clientSock, "Invalid UTF-8 file path.");
+    }
+
     std::cout << "Download path: " << request.path << std::endl;
 
+    std::filesystem::path filePath(widePath);
+
     std::error_code ec;
-    if (!std::filesystem::is_regular_file(request.path, ec)) {
+    if (!std::filesystem::is_regular_file(filePath, ec)) {
         return sendDownloadStartError(clientSock, "File not found or access denied.");
     }
 
-    uintmax_t fileSize = std::filesystem::file_size(request.path, ec);
+    uintmax_t fileSize = std::filesystem::file_size(filePath, ec);
     if (ec) {
         return sendDownloadStartError(clientSock, "Failed to get file size.");
     }
 
-    std::ifstream file(request.path, std::ios::binary);
+    std::ifstream file(filePath, std::ios::binary);
     if (!file) {
         return sendDownloadStartError(clientSock, "Failed to open file for reading.");
     }
@@ -106,7 +182,7 @@ bool handleDownloadStart(SOCKET clientSock, const ByteBuffer& requestPayload)
     DownloadStartResponse response{};
     response.ok = 1;
     response.fileSize = static_cast<uint64_t>(fileSize);
-    response.fileName = std::filesystem::path(request.path).filename().string();
+    response.fileName = wideToUtf8(filePath.filename().wstring());
 
     if (!sendPacket(clientSock, CMD::CMD_DOWNLOAD_START, serializeDownloadStartResponse(response))) {
         return false;

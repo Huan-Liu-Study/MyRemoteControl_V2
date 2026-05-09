@@ -100,6 +100,39 @@ void testListDirResponseFailsWhenPayloadIsIncomplete() {
     expectTrue(!deserializeListDirResponse(writer.buffer(), decoded), "list dir response should fail on incomplete payload");
 }
 
+void testMouseMoveRequestRoundTrip() {
+    MouseMoveRequest request{500, 300};
+
+    ByteBuffer payload = serializeMouseMoveRequest(request);
+
+    MouseMoveRequest decoded{};
+    expectTrue(deserializeMouseMoveRequest(payload, decoded), "mouse move request deserialize should succeed");
+    expectTrue(decoded.x == 500, "mouse move x mismatch");
+    expectTrue(decoded.y == 300, "mouse move y mismatch");
+}
+
+void testMouseClickRequestRoundTrip() {
+    MouseClickRequest request{1u, 3u};
+
+    ByteBuffer payload = serializeMouseClickRequest(request);
+
+    MouseClickRequest decoded{};
+    expectTrue(deserializeMouseClickRequest(payload, decoded), "mouse click request deserialize should succeed");
+    expectTrue(decoded.button == 1u, "mouse click button mismatch");
+    expectTrue(decoded.action == 3u, "mouse click action mismatch");
+}
+
+void testMousePositionResponseRoundTrip() {
+    MousePositionResponse response{900, 200};
+
+    ByteBuffer payload = serializeMousePositionResponse(response);
+
+    MousePositionResponse decoded{};
+    expectTrue(deserializeMousePositionResponse(payload, decoded), "mouse position response deserialize should succeed");
+    expectTrue(decoded.x == 900, "mouse position x mismatch");
+    expectTrue(decoded.y == 200, "mouse position y mismatch");
+}
+
 } // namespace
 
 int main() {
@@ -112,6 +145,9 @@ int main() {
         testListDirResponseRoundTrip();
         testListDirRequestFailsWhenPayloadHasTrailingBytes();
         testListDirResponseFailsWhenPayloadIsIncomplete();
+        testMouseMoveRequestRoundTrip();
+        testMouseClickRequestRoundTrip();
+        testMousePositionResponseRoundTrip();
 
         std::cout << "All message serialization tests passed." << std::endl;
         return 0;

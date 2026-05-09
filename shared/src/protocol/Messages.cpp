@@ -165,3 +165,76 @@ bool deserializeDownloadStartResponse(const ByteBuffer& payload, DownloadStartRe
 
     return reader.isFinished();
 }
+
+ByteBuffer serializeMouseMoveRequest(const MouseMoveRequest& request)
+{
+    BinaryWriter writer;
+    writer.writeUint32(static_cast<uint32_t>(request.x));
+    writer.writeUint32(static_cast<uint32_t>(request.y));
+    return writer.buffer();
+}
+
+bool deserializeMouseMoveRequest(const ByteBuffer& payload, MouseMoveRequest& outRequest)
+{
+    BinaryReader reader(payload);
+
+    uint32_t x = 0;
+    uint32_t y = 0;
+    if (!reader.readUint32(x) || !reader.readUint32(y)) {
+        return false;
+    }
+
+    if (!reader.isFinished()) {
+        return false;
+    }
+
+    outRequest.x = static_cast<int32_t>(x);
+    outRequest.y = static_cast<int32_t>(y);
+    return true;
+}
+
+ByteBuffer serializeMouseClickRequest(const MouseClickRequest& request)
+{
+    BinaryWriter writer;
+    writer.writeUint32(request.button);
+    writer.writeUint32(request.action);
+    return writer.buffer();
+}
+
+bool deserializeMouseClickRequest(const ByteBuffer& payload, MouseClickRequest& outRequest)
+{
+    BinaryReader reader(payload);
+
+    if (!reader.readUint32(outRequest.button) || !reader.readUint32(outRequest.action)) {
+        return false;
+    }
+
+    return reader.isFinished();
+}
+
+ByteBuffer serializeMousePositionResponse(const MousePositionResponse& response)
+{
+    BinaryWriter writer;
+    writer.writeUint32(static_cast<uint32_t>(response.x));
+    writer.writeUint32(static_cast<uint32_t>(response.y));
+    return writer.buffer();
+}
+
+bool deserializeMousePositionResponse(const ByteBuffer& payload, MousePositionResponse& outResponse)
+{
+    BinaryReader reader(payload);
+
+    uint32_t x = 0;
+    uint32_t y = 0;
+    if (!reader.readUint32(x) || !reader.readUint32(y)) {
+        return false;
+    }
+
+    if (!reader.isFinished()) {
+        return false;
+    }
+
+    outResponse.x = static_cast<int32_t>(x);
+    outResponse.y = static_cast<int32_t>(y);
+    return true;
+}
