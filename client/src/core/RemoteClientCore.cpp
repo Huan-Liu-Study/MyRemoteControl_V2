@@ -221,6 +221,72 @@ bool RemoteClientCore::receiveDownloadChunks(const DownloadChunkHandler& onChunk
     }
 }
 
+bool RemoteClientCore::requestScreenshot(ScreenshotStartResponse& outResponse, std::string& errorMessage, uint32_t quality, uint32_t scalePercent)
+{
+    if (!isConnected()) {
+        errorMessage = "Not connected";
+        return false;
+    }
+
+    ScreenshotStartRequest request{};
+    request.quality = quality;
+    request.scalePercent = scalePercent;
+
+    if (!sendPacket(toSocket(socket_), CMD::CMD_SCREENSHOT_START, serializeScreenshotStartRequest(request))) {
+        errorMessage = "Failed to send screenshot request";
+        return false;
+    }
+
+    ParsedPacket response{};
+    if (!receiveExpected(CMD::CMD_SCREENSHOT_START, response, errorMessage)) {
+        return false;
+    }
+
+    if (!deserializeScreenshotStartResponse(response.payload, outResponse)) {
+        errorMessage = "Failed to parse screenshot response";
+        return false;
+    }
+
+    errorMessage.clear();
+    return true;
+}
+
+bool RemoteClientCore::receiveScreenshotChunks(const DownloadChunkHandler& onChunk, std::string& errorMessage)
+{
+    if (!isConnected()) {
+        errorMessage = "Not connected";
+        return false;
+    }
+
+    while (true) {
+        ParsedPacket chunkPacket{};
+        if (!recvPacket(toSocket(socket_), chunkPacket)) {
+            errorMessage = wsaErrorText("recvPacket");
+            return false;
+        }
+
+        if (chunkPacket.header.command == CMD::CMD_SCREENSHOT_CHUNK) {
+            if (onChunk && !onChunk(chunkPacket.payload, errorMessage)) {
+                return false;
+            }
+            continue;
+        }
+
+        if (chunkPacket.header.command == CMD::CMD_SCREENSHOT_END) {
+            errorMessage.clear();
+            return true;
+        }
+
+        if (chunkPacket.header.command == CMD::CMD_ERROR) {
+            errorMessage = "Server error during screenshot: " + PacketCodec::bytesToString(chunkPacket.payload);
+            return false;
+        }
+
+        errorMessage = "Unexpected packet during screenshot: " + std::to_string(chunkPacket.header.command);
+        return false;
+    }
+}
+
 bool RemoteClientCore::moveMouse(int32_t x, int32_t y, std::string& errorMessage)
 {
     if (!isConnected()) {
@@ -243,6 +309,11 @@ bool RemoteClientCore::moveMouse(int32_t x, int32_t y, std::string& errorMessage
 
 bool RemoteClientCore::clickMouse(uint32_t button, std::string& errorMessage)
 {
+    return sendMouseButton(button, 3, errorMessage);
+}
+
+bool RemoteClientCore::sendMouseButton(uint32_t button, uint32_t action, std::string& errorMessage)
+{
     if (!isConnected()) {
         errorMessage = "Not connected";
         return false;
@@ -250,15 +321,73 @@ bool RemoteClientCore::clickMouse(uint32_t button, std::string& errorMessage)
 
     MouseClickRequest request{};
     request.button = button;
-    request.action = 3;
+    request.action = action;
 
     if (!sendPacket(toSocket(socket_), CMD::CMD_MOUSE_CLICK, serializeMouseClickRequest(request))) {
-        errorMessage = "Failed to send mouse click request";
+        errorMessage = "Failed to send mouse button request";
         return false;
     }
 
     ParsedPacket response{};
     return receiveExpected(CMD::CMD_MOUSE_CLICK, response, errorMessage);
+}
+
+bool RemoteClientCore::dragMouse(
+    uint32_t button,
+    int32_t fromX,
+    int32_t fromY,
+    int32_t toX,
+    int32_t toY,
+    std::string& errorMessage
+)
+{
+    if (!moveMouse(fromX, fromY, errorMessage)) {
+        return false;
+    }
+
+    if (!sendMouseButton(button, 1, errorMessage)) {
+        return false;
+    }
+
+    if (!moveMouse(toX, toY, errorMessage)) {
+        return false;
+    }
+
+    return sendMouseButton(button, 2, errorMessage);
+}
+
+bool RemoteClientCore::smoothDragMouse(
+    uint32_t button,
+    int32_t fromX,
+    int32_t fromY,
+    int32_t toX,
+    int32_t toY,
+    uint32_t steps,
+    std::string& errorMessage
+)
+{
+    if (steps == 0) {
+        return dragMouse(button, fromX, fromY, toX, toY, errorMessage);
+    }
+
+    if (!moveMouse(fromX, fromY, errorMessage)) {
+        return false;
+    }
+
+    if (!sendMouseButton(button, 1, errorMessage)) {
+        return false;
+    }
+
+    for (uint32_t i = 1; i <= steps; ++i) {
+        const int32_t x = fromX + static_cast<int32_t>((static_cast<int64_t>(toX - fromX) * i) / steps);
+        const int32_t y = fromY + static_cast<int32_t>((static_cast<int64_t>(toY - fromY) * i) / steps);
+
+        if (!moveMouse(x, y, errorMessage)) {
+            return false;
+        }
+    }
+
+    return sendMouseButton(button, 2, errorMessage);
 }
 
 bool RemoteClientCore::getMousePosition(MousePositionResponse& outPosition, std::string& errorMessage)
@@ -285,6 +414,45 @@ bool RemoteClientCore::getMousePosition(MousePositionResponse& outPosition, std:
 
     errorMessage.clear();
     return true;
+}
+
+bool RemoteClientCore::sendKeyboardEvent(uint32_t virtualKey, uint32_t action, std::string& errorMessage)
+{
+    if (!isConnected()) {
+        errorMessage = "Not connected";
+        return false;
+    }
+
+    KeyboardEventRequest request{};
+    request.virtualKey = virtualKey;
+    request.action = action;
+
+    if (!sendPacket(toSocket(socket_), CMD::CMD_KEYBOARD_EVENT, serializeKeyboardEventRequest(request))) {
+        errorMessage = "Failed to send keyboard event";
+        return false;
+    }
+
+    ParsedPacket response{};
+    return receiveExpected(CMD::CMD_KEYBOARD_EVENT, response, errorMessage);
+}
+
+bool RemoteClientCore::sendMouseWheel(int32_t delta, std::string& errorMessage)
+{
+    if (!isConnected()) {
+        errorMessage = "Not connected";
+        return false;
+    }
+
+    MouseWheelRequest request{};
+    request.delta = delta;
+
+    if (!sendPacket(toSocket(socket_), CMD::CMD_MOUSE_WHEEL, serializeMouseWheelRequest(request))) {
+        errorMessage = "Failed to send mouse wheel event";
+        return false;
+    }
+
+    ParsedPacket response{};
+    return receiveExpected(CMD::CMD_MOUSE_WHEEL, response, errorMessage);
 }
 
 bool RemoteClientCore::receiveExpected(CMD::Type expectedCommand, ParsedPacket& outPacket, std::string& errorMessage)

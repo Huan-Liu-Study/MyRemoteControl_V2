@@ -27,9 +27,16 @@ public:
 
     bool requestDownload(const std::string& remotePath, DownloadStartResponse& outResponse, std::string& errorMessage);
     bool receiveDownloadChunks(const DownloadChunkHandler& onChunk, std::string& errorMessage);
+    bool requestScreenshot(ScreenshotStartResponse& outResponse, std::string& errorMessage, uint32_t quality = 70, uint32_t scalePercent = 100);
+    bool receiveScreenshotChunks(const DownloadChunkHandler& onChunk, std::string& errorMessage);
     bool moveMouse(int32_t x, int32_t y, std::string& errorMessage);
+    bool sendMouseButton(uint32_t button, uint32_t action, std::string& errorMessage);
     bool clickMouse(uint32_t button, std::string& errorMessage);
+    bool dragMouse(uint32_t button, int32_t fromX, int32_t fromY, int32_t toX, int32_t toY, std::string& errorMessage);
+    bool smoothDragMouse(uint32_t button, int32_t fromX, int32_t fromY, int32_t toX, int32_t toY, uint32_t steps, std::string& errorMessage);
     bool getMousePosition(MousePositionResponse& outPosition, std::string& errorMessage);
+    bool sendKeyboardEvent(uint32_t virtualKey, uint32_t action, std::string& errorMessage);
+    bool sendMouseWheel(int32_t delta, std::string& errorMessage);
 
 private:
     bool receiveExpected(CMD::Type expectedCommand, ParsedPacket& outPacket, std::string& errorMessage);

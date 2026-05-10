@@ -7,7 +7,7 @@ project(MyRemoteControl_V2 CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-link_libraries(ws2_32)
+link_libraries(ws2_32 gdi32 gdiplus)
 
 include_directories(shared/include)
 include_directories(server/include)
@@ -28,6 +28,7 @@ add_executable(RemoteServer
     server/src/handlers/DriveHandler.cpp
     server/src/handlers/FileHandler.cpp
     server/src/handlers/InputHandler.cpp
+    server/src/handlers/ScreenHandler.cpp
     ${SHARED_SOURCES}
 )
 
@@ -46,9 +47,11 @@ if(Qt6_FOUND)
         client/src/qt/qt_main.cpp
         client/src/qt/MainWindow.cpp
         client/src/qt/RemoteClientWorker.cpp
+        client/src/qt/ScreenClientWorker.cpp
         client/src/core/RemoteClientCore.cpp
         client/include/qt/MainWindow.h
         client/include/qt/RemoteClientWorker.h
+        client/include/qt/ScreenClientWorker.h
         client/include/core/RemoteClientCore.h
         ${SHARED_SOURCES}
     )

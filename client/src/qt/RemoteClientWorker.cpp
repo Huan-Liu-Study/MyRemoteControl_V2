@@ -44,7 +44,7 @@ void RemoteClientWorker::connectToServer(QString host, int port)
     }
 
     emit connected();
-    emit logMessage("Connected");
+    emit logMessage("Control channel connected");
     emit requestFinished();
 }
 
@@ -197,6 +197,118 @@ void RemoteClientWorker::downloadFile(QString remotePath, QString localDir)
     emit logMessage("Download complete");
     emit downloadFinished(localPath);
     emit requestFinished();
+}
+
+void RemoteClientWorker::clickMouseAt(int x, int y, int button)
+{
+    if (!isConnected()) {
+        emit logMessage("Not connected");
+        emit requestFinished();
+        return;
+    }
+
+    emit logMessage("Remote click: " + QString::number(x) + ", " + QString::number(y));
+
+    std::string errorMessage;
+    if (!client_.moveMouse(x, y, errorMessage)) {
+        emit logMessage(toQString(errorMessage));
+        emit requestFinished();
+        return;
+    }
+
+    if (!client_.clickMouse(static_cast<uint32_t>(button), errorMessage)) {
+        emit logMessage(toQString(errorMessage));
+        emit requestFinished();
+        return;
+    }
+}
+
+void RemoteClientWorker::mouseDownAt(int x, int y, int button)
+{
+    if (!isConnected()) {
+        return;
+    }
+
+    std::string errorMessage;
+    if (!client_.moveMouse(x, y, errorMessage)) {
+        emit logMessage(toQString(errorMessage));
+        return;
+    }
+
+    if (!client_.sendMouseButton(static_cast<uint32_t>(button), 1, errorMessage)) {
+        emit logMessage(toQString(errorMessage));
+    }
+}
+
+void RemoteClientWorker::mouseMoveAt(int x, int y)
+{
+    if (!isConnected()) {
+        return;
+    }
+
+    std::string errorMessage;
+    if (!client_.moveMouse(x, y, errorMessage)) {
+        emit logMessage(toQString(errorMessage));
+    }
+}
+
+void RemoteClientWorker::mouseUpAt(int x, int y, int button)
+{
+    if (!isConnected()) {
+        return;
+    }
+
+    std::string errorMessage;
+    if (!client_.moveMouse(x, y, errorMessage)) {
+        emit logMessage(toQString(errorMessage));
+        return;
+    }
+
+    if (!client_.sendMouseButton(static_cast<uint32_t>(button), 2, errorMessage)) {
+        emit logMessage(toQString(errorMessage));
+        return;
+    }
+}
+
+void RemoteClientWorker::mouseWheelAt(int x, int y, int delta)
+{
+    if (!isConnected()) {
+        return;
+    }
+
+    std::string errorMessage;
+    if (!client_.moveMouse(x, y, errorMessage)) {
+        emit logMessage(toQString(errorMessage));
+        return;
+    }
+
+    if (!client_.sendMouseWheel(delta, errorMessage)) {
+        emit logMessage(toQString(errorMessage));
+    }
+}
+
+void RemoteClientWorker::keyDown(int virtualKey)
+{
+    if (!isConnected()) {
+        return;
+    }
+
+    std::string errorMessage;
+    if (!client_.sendKeyboardEvent(static_cast<uint32_t>(virtualKey), 1, errorMessage)) {
+        emit logMessage(toQString(errorMessage));
+    }
+}
+
+void RemoteClientWorker::keyUp(int virtualKey)
+{
+    if (!isConnected()) {
+        return;
+    }
+
+    std::string errorMessage;
+    if (!client_.sendKeyboardEvent(static_cast<uint32_t>(virtualKey), 2, errorMessage)) {
+        emit logMessage(toQString(errorMessage));
+    }
 }
 
 bool RemoteClientWorker::isConnected() const

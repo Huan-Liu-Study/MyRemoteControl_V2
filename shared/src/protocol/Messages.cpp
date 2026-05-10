@@ -238,3 +238,103 @@ bool deserializeMousePositionResponse(const ByteBuffer& payload, MousePositionRe
     outResponse.y = static_cast<int32_t>(y);
     return true;
 }
+
+ByteBuffer serializeKeyboardEventRequest(const KeyboardEventRequest& request)
+{
+    BinaryWriter writer;
+    writer.writeUint32(request.virtualKey);
+    writer.writeUint32(request.action);
+    return writer.buffer();
+}
+
+bool deserializeKeyboardEventRequest(const ByteBuffer& payload, KeyboardEventRequest& outRequest)
+{
+    BinaryReader reader(payload);
+
+    if (!reader.readUint32(outRequest.virtualKey) || !reader.readUint32(outRequest.action)) {
+        return false;
+    }
+
+    return reader.isFinished();
+}
+
+ByteBuffer serializeMouseWheelRequest(const MouseWheelRequest& request)
+{
+    BinaryWriter writer;
+    writer.writeUint32(static_cast<uint32_t>(request.delta));
+    return writer.buffer();
+}
+
+bool deserializeMouseWheelRequest(const ByteBuffer& payload, MouseWheelRequest& outRequest)
+{
+    BinaryReader reader(payload);
+
+    uint32_t delta = 0;
+    if (!reader.readUint32(delta)) {
+        return false;
+    }
+
+    if (!reader.isFinished()) {
+        return false;
+    }
+
+    outRequest.delta = static_cast<int32_t>(delta);
+    return true;
+}
+
+ByteBuffer serializeScreenshotStartRequest(const ScreenshotStartRequest& request)
+{
+    BinaryWriter writer;
+    writer.writeUint32(request.quality);
+    writer.writeUint32(request.scalePercent);
+    return writer.buffer();
+}
+
+bool deserializeScreenshotStartRequest(const ByteBuffer& payload, ScreenshotStartRequest& outRequest)
+{
+    BinaryReader reader(payload);
+
+    if (!reader.readUint32(outRequest.quality) || !reader.readUint32(outRequest.scalePercent)) {
+        return false;
+    }
+
+    return reader.isFinished();
+}
+
+ByteBuffer serializeScreenshotStartResponse(const ScreenshotStartResponse& response)
+{
+    BinaryWriter writer;
+    writer.writeUint32(response.ok);
+    writer.writeUint64(response.imageSize);
+    writer.writeUint32(response.screenWidth);
+    writer.writeUint32(response.screenHeight);
+    writer.writeString(response.fileName);
+    writer.writeString(response.imageFormat);
+    writer.writeString(response.errorMessage);
+    return writer.buffer();
+}
+
+bool deserializeScreenshotStartResponse(const ByteBuffer& payload, ScreenshotStartResponse& outResponse)
+{
+    BinaryReader reader(payload);
+
+    if (!reader.readUint32(outResponse.ok)) {
+        return false;
+    }
+
+    if (!reader.readUint64(outResponse.imageSize)) {
+        return false;
+    }
+
+    if (!reader.readUint32(outResponse.screenWidth) || !reader.readUint32(outResponse.screenHeight)) {
+        return false;
+    }
+
+    if (!reader.readString(outResponse.fileName)
+        || !reader.readString(outResponse.imageFormat)
+        || !reader.readString(outResponse.errorMessage)) {
+        return false;
+    }
+
+    return reader.isFinished();
+}

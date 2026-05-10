@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -19,6 +20,13 @@ public slots:
     void listDrives();
     void listDirectory(QString path);
     void downloadFile(QString remotePath, QString localDir);
+    void clickMouseAt(int x, int y, int button);
+    void mouseDownAt(int x, int y, int button);
+    void mouseMoveAt(int x, int y);
+    void mouseUpAt(int x, int y, int button);
+    void mouseWheelAt(int x, int y, int delta);
+    void keyDown(int virtualKey);
+    void keyUp(int virtualKey);
 
 signals:
     void connected();

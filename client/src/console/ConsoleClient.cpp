@@ -17,8 +17,14 @@ void printHelp()
     std::cout << "  drives          list remote drives" << std::endl;
     std::cout << "  dir <path>      list remote directory, example: dir C:\\" << std::endl;
     std::cout << "  download <path> download remote small file" << std::endl;
+    std::cout << "  screenshot      save remote screen as screenshot.bmp" << std::endl;
     std::cout << "  mouse move <x> <y>       move remote mouse to absolute screen position" << std::endl;
     std::cout << "  mouse click <left|right|middle>  click remote mouse button" << std::endl;
+    std::cout << "  mouse down <left|right|middle>   press remote mouse button" << std::endl;
+    std::cout << "  mouse up <left|right|middle>     release remote mouse button" << std::endl;
+    std::cout << "  mouse drag <left|right|middle> <fromX> <fromY> <toX> <toY>" << std::endl;
+    std::cout << "  mouse smoothdrag <left|right|middle> <fromX> <fromY> <toX> <toY> <steps>" << std::endl;
+    std::cout << "  mouse wheel <delta>      scroll remote mouse wheel, example: mouse wheel -120" << std::endl;
     std::cout << "  mouse pos                show remote mouse position" << std::endl;
     std::cout << "  quit            exit client" << std::endl;
 }
@@ -101,6 +107,56 @@ bool downloadFile(RemoteClientCore& client, const std::string& remotePath)
     return true;
 }
 
+bool saveScreenshot(RemoteClientCore& client)
+{
+    std::string errorMessage;
+    ScreenshotStartResponse response{};
+    if (!client.requestScreenshot(response, errorMessage)) {
+        std::cerr << errorMessage << std::endl;
+        return false;
+    }
+
+    if (!response.ok) {
+        std::cerr << "Server denied screenshot: " << response.errorMessage << std::endl;
+        return true;
+    }
+
+    std::string localFileName = response.fileName.empty() ? "screenshot.bmp" : response.fileName;
+    std::ofstream out(localFileName, std::ios::binary);
+    if (!out) {
+        std::cerr << "Failed to create local file: " << localFileName << std::endl;
+        return true;
+    }
+
+    std::cout << "\n[Receiving screenshot] " << localFileName
+              << " (Size: " << response.imageSize << " bytes)\n" << std::endl;
+
+    uint64_t totalReceived = 0;
+    const bool ok = client.receiveScreenshotChunks(
+        [&](const ByteBuffer& chunk, std::string& chunkError) {
+            out.write(reinterpret_cast<const char*>(chunk.data()), chunk.size());
+            if (!out) {
+                chunkError = "Failed to write local screenshot.";
+                return false;
+            }
+
+            totalReceived += chunk.size();
+            std::cout << "\rProgress: " << totalReceived << " / "
+                      << response.imageSize << " bytes" << std::flush;
+            return true;
+        },
+        errorMessage
+    );
+
+    if (!ok) {
+        std::cerr << "\n[!] " << errorMessage << std::endl;
+        return false;
+    }
+
+    std::cout << "\n\nScreenshot saved." << std::endl;
+    return true;
+}
+
 uint32_t parseMouseButton(const std::string& button)
 {
     if (button == "left") {
@@ -112,6 +168,23 @@ uint32_t parseMouseButton(const std::string& button)
     }
 
     if (button == "middle") {
+        return 3;
+    }
+
+    return 0;
+}
+
+uint32_t parseMouseAction(const std::string& action)
+{
+    if (action == "down") {
+        return 1;
+    }
+
+    if (action == "up") {
+        return 2;
+    }
+
+    if (action == "click") {
         return 3;
     }
 
@@ -156,26 +229,95 @@ bool handleMouseCommand(RemoteClientCore& client, const std::string& line)
         return true;
     }
 
-    if (action == "click") {
+    if (action == "wheel") {
+        int32_t delta = 0;
+        if (!(input >> delta)) {
+            std::cerr << "Usage: mouse wheel <delta>" << std::endl;
+            return true;
+        }
+
+        if (!client.sendMouseWheel(delta, errorMessage)) {
+            std::cerr << errorMessage << std::endl;
+            return false;
+        }
+
+        std::cout << "Mouse wheel: " << delta << std::endl;
+        return true;
+    }
+
+    if (action == "drag") {
+        std::string buttonText;
+        int32_t fromX = 0;
+        int32_t fromY = 0;
+        int32_t toX = 0;
+        int32_t toY = 0;
+        input >> buttonText >> fromX >> fromY >> toX >> toY;
+
+        const uint32_t button = parseMouseButton(buttonText);
+        if (button == 0 || !input) {
+            std::cerr << "Usage: mouse drag <left|right|middle> <fromX> <fromY> <toX> <toY>" << std::endl;
+            return true;
+        }
+
+        if (!client.dragMouse(button, fromX, fromY, toX, toY, errorMessage)) {
+            std::cerr << errorMessage << std::endl;
+            return false;
+        }
+
+        std::cout << "Mouse dragged: " << buttonText
+                  << " from " << fromX << ", " << fromY
+                  << " to " << toX << ", " << toY << std::endl;
+        return true;
+    }
+
+    if (action == "smoothdrag") {
+        std::string buttonText;
+        int32_t fromX = 0;
+        int32_t fromY = 0;
+        int32_t toX = 0;
+        int32_t toY = 0;
+        uint32_t steps = 0;
+        input >> buttonText >> fromX >> fromY >> toX >> toY >> steps;
+
+        const uint32_t button = parseMouseButton(buttonText);
+        if (button == 0 || !input) {
+            std::cerr << "Usage: mouse smoothdrag <left|right|middle> <fromX> <fromY> <toX> <toY> <steps>" << std::endl;
+            return true;
+        }
+
+        if (!client.smoothDragMouse(button, fromX, fromY, toX, toY, steps, errorMessage)) {
+            std::cerr << errorMessage << std::endl;
+            return false;
+        }
+
+        std::cout << "Mouse smooth dragged: " << buttonText
+                  << " from " << fromX << ", " << fromY
+                  << " to " << toX << ", " << toY
+                  << " in " << steps << " steps" << std::endl;
+        return true;
+    }
+
+    if (action == "down" || action == "up" || action == "click") {
         std::string buttonText;
         input >> buttonText;
 
         const uint32_t button = parseMouseButton(buttonText);
         if (button == 0) {
-            std::cerr << "Usage: mouse click <left|right|middle>" << std::endl;
+            std::cerr << "Usage: mouse <down|up|click> <left|right|middle>" << std::endl;
             return true;
         }
 
-        if (!client.clickMouse(button, errorMessage)) {
+        const uint32_t mouseAction = parseMouseAction(action);
+        if (!client.sendMouseButton(button, mouseAction, errorMessage)) {
             std::cerr << errorMessage << std::endl;
             return false;
         }
 
-        std::cout << "Mouse clicked: " << buttonText << std::endl;
+        std::cout << "Mouse " << action << ": " << buttonText << std::endl;
         return true;
     }
 
-    std::cerr << "Usage: mouse move <x> <y> or mouse click <left|right|middle>" << std::endl;
+    std::cerr << "Usage: mouse move <x> <y>, mouse wheel <delta>, mouse pos, mouse drag/smoothdrag <button> <fromX> <fromY> <toX> <toY>, or mouse <down|up|click> <button>" << std::endl;
     return true;
 }
 
@@ -205,6 +347,10 @@ bool handleCommand(RemoteClientCore& client, const std::string& line)
 
     if (line.rfind("download ", 0) == 0) {
         return downloadFile(client, trimQuotes(line.substr(9)));
+    }
+
+    if (line == "screenshot") {
+        return saveScreenshot(client);
     }
 
     if (line.rfind("mouse ", 0) == 0) {

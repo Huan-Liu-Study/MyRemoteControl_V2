@@ -51,6 +51,29 @@ struct MousePositionResponse {
     int32_t y;
 };
 
+struct KeyboardEventRequest {
+    uint32_t virtualKey;
+    uint32_t action;
+};
+
+struct MouseWheelRequest {
+    int32_t delta;
+};
+
+struct ScreenshotStartRequest {
+    uint32_t quality;
+    uint32_t scalePercent;
+};
+
+struct ScreenshotStartResponse {
+    uint32_t ok;
+    uint64_t imageSize;
+    uint32_t screenWidth;
+    uint32_t screenHeight;
+    std::string fileName;
+    std::string imageFormat;
+    std::string errorMessage;
+};
 
 
 ByteBuffer serializeDriveListResponse(const DriveListResponse& response);
@@ -76,3 +99,15 @@ bool deserializeMouseClickRequest(const ByteBuffer& payload, MouseClickRequest& 
 
 ByteBuffer serializeMousePositionResponse(const MousePositionResponse& response);
 bool deserializeMousePositionResponse(const ByteBuffer& payload, MousePositionResponse& outResponse);
+
+ByteBuffer serializeKeyboardEventRequest(const KeyboardEventRequest& request);
+bool deserializeKeyboardEventRequest(const ByteBuffer& payload, KeyboardEventRequest& outRequest);
+
+ByteBuffer serializeMouseWheelRequest(const MouseWheelRequest& request);
+bool deserializeMouseWheelRequest(const ByteBuffer& payload, MouseWheelRequest& outRequest);
+
+ByteBuffer serializeScreenshotStartRequest(const ScreenshotStartRequest& request);
+bool deserializeScreenshotStartRequest(const ByteBuffer& payload, ScreenshotStartRequest& outRequest);
+
+ByteBuffer serializeScreenshotStartResponse(const ScreenshotStartResponse& response);
+bool deserializeScreenshotStartResponse(const ByteBuffer& payload, ScreenshotStartResponse& outResponse);

@@ -133,6 +133,54 @@ void testMousePositionResponseRoundTrip() {
     expectTrue(decoded.y == 200, "mouse position y mismatch");
 }
 
+void testScreenshotStartResponseRoundTrip() {
+    ScreenshotStartResponse response{1u, 123456u, 1920u, 1080u, "screenshot.jpg", "JPG", ""};
+
+    ByteBuffer payload = serializeScreenshotStartResponse(response);
+
+    ScreenshotStartResponse decoded{};
+    expectTrue(deserializeScreenshotStartResponse(payload, decoded), "screenshot response deserialize should succeed");
+    expectTrue(decoded.ok == 1u, "screenshot ok mismatch");
+    expectTrue(decoded.imageSize == 123456u, "screenshot size mismatch");
+    expectTrue(decoded.screenWidth == 1920u, "screenshot screen width mismatch");
+    expectTrue(decoded.screenHeight == 1080u, "screenshot screen height mismatch");
+    expectTrue(decoded.fileName == "screenshot.jpg", "screenshot file name mismatch");
+    expectTrue(decoded.imageFormat == "JPG", "screenshot image format mismatch");
+    expectTrue(decoded.errorMessage.empty(), "screenshot error message should be empty");
+}
+
+void testKeyboardEventRequestRoundTrip() {
+    KeyboardEventRequest request{65u, 1u};
+
+    ByteBuffer payload = serializeKeyboardEventRequest(request);
+
+    KeyboardEventRequest decoded{};
+    expectTrue(deserializeKeyboardEventRequest(payload, decoded), "keyboard request deserialize should succeed");
+    expectTrue(decoded.virtualKey == 65u, "keyboard virtual key mismatch");
+    expectTrue(decoded.action == 1u, "keyboard action mismatch");
+}
+
+void testMouseWheelRequestRoundTrip() {
+    MouseWheelRequest request{-120};
+
+    ByteBuffer payload = serializeMouseWheelRequest(request);
+
+    MouseWheelRequest decoded{};
+    expectTrue(deserializeMouseWheelRequest(payload, decoded), "mouse wheel request deserialize should succeed");
+    expectTrue(decoded.delta == -120, "mouse wheel delta mismatch");
+}
+
+void testScreenshotStartRequestRoundTrip() {
+    ScreenshotStartRequest request{85u, 50u};
+
+    ByteBuffer payload = serializeScreenshotStartRequest(request);
+
+    ScreenshotStartRequest decoded{};
+    expectTrue(deserializeScreenshotStartRequest(payload, decoded), "screenshot request deserialize should succeed");
+    expectTrue(decoded.quality == 85u, "screenshot quality mismatch");
+    expectTrue(decoded.scalePercent == 50u, "screenshot scale mismatch");
+}
+
 } // namespace
 
 int main() {
@@ -148,6 +196,10 @@ int main() {
         testMouseMoveRequestRoundTrip();
         testMouseClickRequestRoundTrip();
         testMousePositionResponseRoundTrip();
+        testScreenshotStartResponseRoundTrip();
+        testKeyboardEventRequestRoundTrip();
+        testMouseWheelRequestRoundTrip();
+        testScreenshotStartRequestRoundTrip();
 
         std::cout << "All message serialization tests passed." << std::endl;
         return 0;

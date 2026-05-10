@@ -5,6 +5,7 @@
 #include "handlers/DriveHandler.h"
 #include "handlers/FileHandler.h"
 #include "handlers/InputHandler.h"
+#include "handlers/ScreenHandler.h"
 #include "net/SocketHelpers.h"
 #include "protocol/Command.h"
 
@@ -38,6 +39,21 @@ bool dispatchCommand(SOCKET clientSock, const ParsedPacket& request)
     if (request.header.command == CMD::CMD_MOUSE_POSITION) {
         std::cout << "Received CMD_MOUSE_POSITION command." << std::endl;
         return handleMousePosition(clientSock);
+    }
+
+    if (request.header.command == CMD::CMD_KEYBOARD_EVENT) {
+        std::cout << "Received CMD_KEYBOARD_EVENT command." << std::endl;
+        return handleKeyboardEvent(clientSock, request.payload);
+    }
+
+    if (request.header.command == CMD::CMD_MOUSE_WHEEL) {
+        std::cout << "Received CMD_MOUSE_WHEEL command." << std::endl;
+        return handleMouseWheel(clientSock, request.payload);
+    }
+
+    if (request.header.command == CMD::CMD_SCREENSHOT_START) {
+        std::cout << "Received CMD_SCREENSHOT_START command." << std::endl;
+        return handleScreenshotStart(clientSock, request.payload);
     }
 
     std::cout << "Received unknown command: " << request.header.command << std::endl;

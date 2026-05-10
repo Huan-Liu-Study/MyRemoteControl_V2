@@ -17,6 +17,9 @@ constexpr uint32_t MOUSE_ACTION_DOWN = 1;
 constexpr uint32_t MOUSE_ACTION_UP = 2;
 constexpr uint32_t MOUSE_ACTION_CLICK = 3;
 
+constexpr uint32_t KEY_ACTION_DOWN = 1;
+constexpr uint32_t KEY_ACTION_UP = 2;
+
 DWORD mouseDownFlag(uint32_t button)
 {
     if (button == MOUSE_BUTTON_LEFT) {
@@ -122,4 +125,42 @@ bool handleMousePosition(SOCKET clientSock)
     response.y = point.y;
 
     return sendPacket(clientSock, CMD::CMD_MOUSE_POSITION, serializeMousePositionResponse(response));
+}
+
+bool handleKeyboardEvent(SOCKET clientSock, const ByteBuffer& requestPayload)
+{
+    KeyboardEventRequest request{};
+    if (!deserializeKeyboardEventRequest(requestPayload, request)) {
+        return sendPacket(clientSock, CMD::CMD_ERROR, "Invalid keyboard event request.");
+    }
+
+    if (request.virtualKey == 0 || request.virtualKey > 255) {
+        return sendPacket(clientSock, CMD::CMD_ERROR, "Invalid virtual key.");
+    }
+
+    const BYTE virtualKey = static_cast<BYTE>(request.virtualKey);
+    const BYTE scanCode = static_cast<BYTE>(MapVirtualKeyA(virtualKey, MAPVK_VK_TO_VSC));
+
+    if (request.action == KEY_ACTION_DOWN) {
+        keybd_event(virtualKey, scanCode, 0, 0);
+        return sendOk(clientSock, CMD::CMD_KEYBOARD_EVENT);
+    }
+
+    if (request.action == KEY_ACTION_UP) {
+        keybd_event(virtualKey, scanCode, KEYEVENTF_KEYUP, 0);
+        return sendOk(clientSock, CMD::CMD_KEYBOARD_EVENT);
+    }
+
+    return sendPacket(clientSock, CMD::CMD_ERROR, "Invalid keyboard action.");
+}
+
+bool handleMouseWheel(SOCKET clientSock, const ByteBuffer& requestPayload)
+{
+    MouseWheelRequest request{};
+    if (!deserializeMouseWheelRequest(requestPayload, request)) {
+        return sendPacket(clientSock, CMD::CMD_ERROR, "Invalid mouse wheel request.");
+    }
+
+    mouse_event(MOUSEEVENTF_WHEEL, 0, 0, static_cast<DWORD>(request.delta), 0);
+    return sendOk(clientSock, CMD::CMD_MOUSE_WHEEL);
 }

@@ -13,6 +13,12 @@ namespace CMD {
         CMD_MOUSE_MOVE  = 201,
         CMD_MOUSE_CLICK = 202,
         CMD_MOUSE_POSITION = 203,
+        CMD_KEYBOARD_EVENT = 204,
+        CMD_MOUSE_WHEEL = 205,
+
+        CMD_SCREENSHOT_START = 301,
+        CMD_SCREENSHOT_CHUNK = 302,
+        CMD_SCREENSHOT_END   = 303,
         
         CMD_ERROR        = 999
     };
