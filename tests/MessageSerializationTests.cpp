@@ -181,6 +181,77 @@ void testScreenshotStartRequestRoundTrip() {
     expectTrue(decoded.scalePercent == 50u, "screenshot scale mismatch");
 }
 
+void testScreenStreamStartRequestRoundTrip() {
+    ScreenStreamStartRequest request{75u, 50u, 200u};
+
+    ByteBuffer payload = serializeScreenStreamStartRequest(request);
+
+    ScreenStreamStartRequest decoded{};
+    expectTrue(deserializeScreenStreamStartRequest(payload, decoded), "screen stream request deserialize should succeed");
+    expectTrue(decoded.quality == 75u, "screen stream quality mismatch");
+    expectTrue(decoded.scalePercent == 50u, "screen stream scale mismatch");
+    expectTrue(decoded.intervalMs == 200u, "screen stream interval mismatch");
+}
+
+void testScreenStreamFrameHeaderRoundTrip() {
+    ScreenStreamFrameHeader header{
+        654321u,
+        1920u,
+        1080u,
+        1440u,
+        810u,
+        2u,
+        101u,
+        100u,
+        10u,
+        20u,
+        300u,
+        200u,
+        2u,
+        200000u,
+        8u,
+        3u,
+        12u,
+        2u,
+        0u,
+        {
+            {10u, 20u, 64u, 64u, 1200u},
+            {90u, 20u, 32u, 64u, 800u}
+        },
+        "JPG"
+    };
+
+    ByteBuffer payload = serializeScreenStreamFrameHeader(header);
+
+    ScreenStreamFrameHeader decoded{};
+    expectTrue(deserializeScreenStreamFrameHeader(payload, decoded), "screen stream frame header deserialize should succeed");
+    expectTrue(decoded.imageSize == 654321u, "screen stream frame size mismatch");
+    expectTrue(decoded.screenWidth == 1920u, "screen stream screen width mismatch");
+    expectTrue(decoded.screenHeight == 1080u, "screen stream screen height mismatch");
+    expectTrue(decoded.captureWidth == 1440u, "screen stream capture width mismatch");
+    expectTrue(decoded.captureHeight == 810u, "screen stream capture height mismatch");
+    expectTrue(decoded.frameType == 2u, "screen stream frame type mismatch");
+    expectTrue(decoded.frameId == 101u, "screen stream frame id mismatch");
+    expectTrue(decoded.baseFrameId == 100u, "screen stream base frame id mismatch");
+    expectTrue(decoded.rectX == 10u, "screen stream rect x mismatch");
+    expectTrue(decoded.rectY == 20u, "screen stream rect y mismatch");
+    expectTrue(decoded.rectWidth == 300u, "screen stream rect width mismatch");
+    expectTrue(decoded.rectHeight == 200u, "screen stream rect height mismatch");
+    expectTrue(decoded.rectCount == 2u, "screen stream rect count mismatch");
+    expectTrue(decoded.estimatedFullImageSize == 200000u, "screen stream full estimate mismatch");
+    expectTrue(decoded.captureMs == 8u, "screen stream capture ms mismatch");
+    expectTrue(decoded.compareMs == 3u, "screen stream compare ms mismatch");
+    expectTrue(decoded.encodeMs == 12u, "screen stream encode ms mismatch");
+    expectTrue(decoded.sendMs == 2u, "screen stream send ms mismatch");
+    expectTrue(decoded.fallbackToKeyFrame == 0u, "screen stream fallback mismatch");
+    expectTrue(decoded.rects.size() == 2u, "screen stream rect vector size mismatch");
+    expectTrue(decoded.rects[0].x == 10u, "screen stream first rect x mismatch");
+    expectTrue(decoded.rects[0].imageSize == 1200u, "screen stream first rect size mismatch");
+    expectTrue(decoded.rects[1].x == 90u, "screen stream second rect x mismatch");
+    expectTrue(decoded.rects[1].imageSize == 800u, "screen stream second rect size mismatch");
+    expectTrue(decoded.imageFormat == "JPG", "screen stream image format mismatch");
+}
+
 } // namespace
 
 int main() {
@@ -200,6 +271,8 @@ int main() {
         testKeyboardEventRequestRoundTrip();
         testMouseWheelRequestRoundTrip();
         testScreenshotStartRequestRoundTrip();
+        testScreenStreamStartRequestRoundTrip();
+        testScreenStreamFrameHeaderRoundTrip();
 
         std::cout << "All message serialization tests passed." << std::endl;
         return 0;

@@ -10,6 +10,7 @@
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QPlainTextEdit>
+#include <QPainter>
 #include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
@@ -27,6 +28,9 @@
 #include "qt/ScreenClientWorker.h"
 
 namespace {
+
+constexpr int SCREEN_STREAM_FRAME_KEY = 1;
+constexpr int SCREEN_STREAM_FRAME_DELTA = 2;
 
 int qtKeyToVirtualKey(int key)
 {
@@ -115,17 +119,17 @@ void MainWindow::buildUi()
 
     qualityInput_ = new QSpinBox(this);
     qualityInput_->setRange(10, 95);
-    qualityInput_->setValue(70);
+    qualityInput_->setValue(60);
 
     scaleInput_ = new QSpinBox(this);
     scaleInput_->setRange(25, 100);
     scaleInput_->setSingleStep(25);
-    scaleInput_->setValue(100);
+    scaleInput_->setValue(75);
 
     refreshIntervalInput_ = new QSpinBox(this);
-    refreshIntervalInput_->setRange(200, 5000);
-    refreshIntervalInput_->setSingleStep(100);
-    refreshIntervalInput_->setValue(1000);
+    refreshIntervalInput_->setRange(100, 5000);
+    refreshIntervalInput_->setSingleStep(50);
+    refreshIntervalInput_->setValue(200);
 
     pathInput_ = new QLineEdit(this);
     pathInput_->setPlaceholderText("C:\\");
@@ -144,7 +148,7 @@ void MainWindow::buildUi()
     listDirButton_ = new QPushButton("List Directory", this);
     downloadButton_ = new QPushButton("Download File", this);
     screenshotButton_ = new QPushButton("Screenshot", this);
-    autoRefreshButton_ = new QPushButton("Auto Refresh", this);
+    autoRefreshButton_ = new QPushButton("Start Stream", this);
 
     QHBoxLayout* buttonLayout = new QHBoxLayout;
     buttonLayout->addWidget(connectButton_);
@@ -205,18 +209,7 @@ void MainWindow::buildUi()
         requestScreenFrame();
     });
     connect(autoRefreshButton_, &QPushButton::clicked, this, [this]() {
-        toggleAutoRefresh();
-    });
-
-    autoRefreshTimer_ = new QTimer(this);
-    autoRefreshTimer_->setInterval(refreshIntervalInput_->value());
-    connect(autoRefreshTimer_, &QTimer::timeout, this, [this]() {
-        requestScreenFrame();
-    });
-    connect(refreshIntervalInput_, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int value) {
-        if (autoRefreshTimer_) {
-            autoRefreshTimer_->setInterval(value);
-        }
+        toggleScreenStream();
     });
 
     inputRefreshTimer_ = new QTimer(this);
@@ -224,6 +217,13 @@ void MainWindow::buildUi()
     inputRefreshTimer_->setInterval(120);
     connect(inputRefreshTimer_, &QTimer::timeout, this, [this]() {
         requestScreenFrame();
+    });
+
+    screenReconnectTimer_ = new QTimer(this);
+    screenReconnectTimer_->setSingleShot(true);
+    screenReconnectTimer_->setInterval(1000);
+    connect(screenReconnectTimer_, &QTimer::timeout, this, [this]() {
+        reconnectScreenChannel();
     });
 }
 
@@ -392,22 +392,70 @@ void MainWindow::startNetworkThread()
         results.push_back(localPath);
         showResults(results);
     });
+    connect(worker_, &RemoteClientWorker::mousePositionProbed, this, [this](
+        int expectedX,
+        int expectedY,
+        int actualX,
+        int actualY
+    ) {
+        const int deltaX = actualX - expectedX;
+        const int deltaY = actualY - expectedY;
+        appendLog("Mouse probe: expected "
+                  + QString::number(expectedX) + ", " + QString::number(expectedY)
+                  + " actual " + QString::number(actualX) + ", " + QString::number(actualY)
+                  + " delta " + QString::number(deltaX) + ", " + QString::number(deltaY));
+    });
     connect(screenWorker_, &ScreenClientWorker::connected, this, [this]() {
         screenConnected_ = true;
+        screenReconnectPending_ = false;
+        screenReconnectAttempts_ = 0;
         if (controlConnected_) {
             setBusy(false);
             setConnected(true);
         }
+
+        if (restartScreenStreamAfterReconnect_) {
+            restartScreenStreamAfterReconnect_ = false;
+            screenStreamActive_ = true;
+            screenBusy_ = true;
+            pendingScreenFrame_ = false;
+            autoRefreshButton_->setText("Stop Stream");
+            appendLog("Screen stream restarting after reconnect");
+
+            const int quality = qualityInput_->value();
+            const int scalePercent = scaleInput_->value();
+            const int intervalMs = refreshIntervalInput_->value();
+            QMetaObject::invokeMethod(screenWorker_, [worker = screenWorker_, quality, scalePercent, intervalMs]() {
+                worker->startScreenStream(quality, scalePercent, intervalMs);
+            }, Qt::QueuedConnection);
+            updateScreenStreamStatus();
+        }
     });
     connect(screenWorker_, &ScreenClientWorker::disconnected, this, [this](const QString& reason) {
+        const bool shouldReconnect = controlConnected_ && !disconnectRequested_ && !reconnectScreenAfterStreamStop_;
+        const bool shouldRestartStream = screenStreamActive_ && shouldReconnect;
         screenConnected_ = false;
         screenBusy_ = false;
         pendingScreenFrame_ = false;
+        screenStreamActive_ = false;
+        restartScreenStreamAfterReconnect_ = shouldRestartStream;
         if (reason.contains(":")) {
             ++screenFailureCount_;
         }
-        setConnected(false);
         appendLog(reason);
+        if (shouldReconnect) {
+            setConnected(true);
+            scheduleScreenReconnect();
+            return;
+        }
+
+        reconnectScreenAfterStreamStop_ = false;
+        restartScreenStreamAfterReconnect_ = false;
+        if (!controlConnected_) {
+            setConnected(false);
+        } else {
+            setConnected(true);
+        }
         updateScreenStreamStatus();
     });
     connect(screenWorker_, &ScreenClientWorker::logMessage, this, [this](const QString& message) {
@@ -421,12 +469,76 @@ void MainWindow::startNetworkThread()
     ) {
         showScreenshot(imageData, imageFormat, screenWidth, screenHeight);
     });
+    connect(screenWorker_, &ScreenClientWorker::screenFrameReceived, this, [this](
+        const QByteArray& imageData,
+        const QString& imageFormat,
+        int screenWidth,
+        int screenHeight,
+        int captureWidth,
+        int captureHeight,
+        int frameType,
+        quint64 frameId,
+        quint64 baseFrameId,
+        int rectX,
+        int rectY,
+        int rectWidth,
+        int rectHeight,
+        QVector<int> rectXs,
+        QVector<int> rectYs,
+        QVector<int> rectWidths,
+        QVector<int> rectHeights,
+        QVector<qint64> rectImageSizes,
+        qint64 estimatedFullImageSize,
+        int captureMs,
+        int compareMs,
+        int encodeMs,
+        int previousSendMs,
+        int fallbackToKeyFrame
+    ) {
+        showScreenStreamFrame(
+            imageData,
+            imageFormat,
+            screenWidth,
+            screenHeight,
+            captureWidth,
+            captureHeight,
+            frameType,
+            frameId,
+            baseFrameId,
+            rectX,
+            rectY,
+            rectWidth,
+            rectHeight,
+            rectXs,
+            rectYs,
+            rectWidths,
+            rectHeights,
+            rectImageSizes,
+            estimatedFullImageSize,
+            captureMs,
+            compareMs,
+            encodeMs,
+            previousSendMs,
+            fallbackToKeyFrame
+        );
+    });
     connect(screenWorker_, &ScreenClientWorker::requestFinished, this, [this]() {
         screenBusy_ = false;
+        if (reconnectScreenAfterStreamStop_) {
+            reconnectScreenAfterStreamStop_ = false;
+            screenConnected_ = false;
+            reconnectScreenChannel();
+            updateScreenStreamStatus();
+            return;
+        }
         if (connected_) {
             setConnected(true);
         }
         updateScreenStreamStatus();
+        if (controlConnected_ && !screenConnected_ && !disconnectRequested_) {
+            scheduleScreenReconnect();
+            return;
+        }
         if (pendingScreenFrame_ && connected_) {
             pendingScreenFrame_ = false;
             requestScreenFrame();
@@ -442,6 +554,15 @@ void MainWindow::startNetworkThread()
 
 void MainWindow::stopNetworkThread()
 {
+    disconnectRequested_ = true;
+    if (screenReconnectTimer_) {
+        screenReconnectTimer_->stop();
+    }
+
+    if (screenWorker_ && screenStreamActive_) {
+        screenWorker_->stopScreenStream();
+    }
+
     if (worker_) {
         QMetaObject::invokeMethod(worker_, "disconnectFromServer", Qt::BlockingQueuedConnection);
     }
@@ -475,9 +596,33 @@ void MainWindow::connectToServer()
     controlConnected_ = false;
     screenConnected_ = false;
     pendingScreenFrame_ = false;
+    screenStreamActive_ = false;
+    reconnectScreenAfterStreamStop_ = false;
+    restartScreenStreamAfterReconnect_ = false;
+    disconnectRequested_ = false;
+    screenReconnectPending_ = false;
+    screenReconnectAttempts_ = 0;
     screenFailureCount_ = 0;
     lastFrameBytes_ = 0;
     lastFrameElapsedMs_ = 0;
+    lastEstimatedFullFrameBytes_ = 0;
+    lastDeltaSavePercent_ = 0.0;
+    currentStreamFrameId_ = 0;
+    currentStreamBaseFrameId_ = 0;
+    skippedDeltaFrameCount_ = 0;
+    requestedKeyFrameCount_ = 0;
+    lastStreamFrameType_ = 0;
+    lastStreamRectX_ = 0;
+    lastStreamRectY_ = 0;
+    lastStreamRectWidth_ = 0;
+    lastStreamRectHeight_ = 0;
+    lastStreamRectCount_ = 0;
+    lastCaptureMs_ = 0;
+    lastCompareMs_ = 0;
+    lastEncodeMs_ = 0;
+    lastPreviousSendMs_ = 0;
+    lastFallbackToKeyFrame_ = 0;
+    keyFrameRequestPending_ = false;
     updateScreenStreamStatus();
 
     const QString host = hostInput_->text();
@@ -498,6 +643,18 @@ void MainWindow::disconnectFromServer()
     }
 
     setBusy(true);
+    disconnectRequested_ = true;
+    screenReconnectPending_ = false;
+    restartScreenStreamAfterReconnect_ = false;
+    if (screenReconnectTimer_) {
+        screenReconnectTimer_->stop();
+    }
+    if (screenWorker_ && screenStreamActive_) {
+        screenWorker_->stopScreenStream();
+        screenStreamActive_ = false;
+        reconnectScreenAfterStreamStop_ = false;
+    }
+
     QMetaObject::invokeMethod(worker_, [worker = worker_]() {
         worker->disconnectFromServer();
     }, Qt::QueuedConnection);
@@ -567,6 +724,10 @@ void MainWindow::requestScreenFrame()
         return;
     }
 
+    if (screenStreamActive_) {
+        return;
+    }
+
     if (screenBusy_) {
         pendingScreenFrame_ = true;
         updateScreenStreamStatus();
@@ -584,29 +745,74 @@ void MainWindow::requestScreenFrame()
     }, Qt::QueuedConnection);
 }
 
-void MainWindow::toggleAutoRefresh()
+void MainWindow::toggleScreenStream()
 {
-    if (!autoRefreshTimer_ || !connected_) {
+    if (!screenWorker_ || !connected_ || !screenConnected_) {
         return;
     }
 
-    if (autoRefreshTimer_->isActive()) {
-        autoRefreshTimer_->stop();
-        autoRefreshButton_->setText("Auto Refresh");
-        appendLog("Auto refresh stopped");
+    if (screenStreamActive_) {
+        screenStreamActive_ = false;
+        reconnectScreenAfterStreamStop_ = true;
+        autoRefreshButton_->setText("Start Stream");
+        appendLog("Screen stream stopping");
+        screenWorker_->stopScreenStream();
+        updateScreenStreamStatus();
         return;
     }
 
-    autoRefreshTimer_->start();
-    autoRefreshButton_->setText("Stop Refresh");
-    appendLog("Auto refresh started");
+    screenStreamActive_ = true;
+    screenBusy_ = true;
+    pendingScreenFrame_ = false;
+    autoRefreshButton_->setText("Stop Stream");
+    appendLog("Screen stream starting");
+    updateScreenStreamStatus();
 
-    requestScreenFrame();
+    const int quality = qualityInput_->value();
+    const int scalePercent = scaleInput_->value();
+    const int intervalMs = refreshIntervalInput_->value();
+    QMetaObject::invokeMethod(screenWorker_, [worker = screenWorker_, quality, scalePercent, intervalMs]() {
+        worker->startScreenStream(quality, scalePercent, intervalMs);
+    }, Qt::QueuedConnection);
+}
+
+void MainWindow::scheduleScreenReconnect()
+{
+    if (!screenReconnectTimer_ || !controlConnected_ || disconnectRequested_) {
+        return;
+    }
+
+    if (screenReconnectPending_) {
+        return;
+    }
+
+    screenReconnectPending_ = true;
+    ++screenReconnectAttempts_;
+    appendLog("Screen channel reconnect scheduled, attempt " + QString::number(screenReconnectAttempts_));
+    screenReconnectTimer_->start();
+    updateScreenStreamStatus();
+}
+
+void MainWindow::reconnectScreenChannel()
+{
+    screenReconnectPending_ = false;
+    if (!screenWorker_ || !controlConnected_ || disconnectRequested_) {
+        updateScreenStreamStatus();
+        return;
+    }
+
+    const QString host = hostInput_->text();
+    const int port = portInput_->value();
+    appendLog("Reconnecting screen channel");
+    QMetaObject::invokeMethod(screenWorker_, [worker = screenWorker_, host, port]() {
+        worker->connectToServer(host, port);
+    }, Qt::QueuedConnection);
+    updateScreenStreamStatus();
 }
 
 void MainWindow::scheduleInputRefresh()
 {
-    if (!inputRefreshTimer_ || !connected_) {
+    if (!inputRefreshTimer_ || !connected_ || screenStreamActive_) {
         return;
     }
 
@@ -615,21 +821,43 @@ void MainWindow::scheduleInputRefresh()
 
 void MainWindow::setConnected(bool connected)
 {
-    if (!connected && autoRefreshTimer_ && autoRefreshTimer_->isActive()) {
-        autoRefreshTimer_->stop();
-        if (autoRefreshButton_) {
-            autoRefreshButton_->setText("Auto Refresh");
-        }
-    }
     if (!connected) {
         controlConnected_ = false;
         screenConnected_ = false;
         screenBusy_ = false;
         pendingScreenFrame_ = false;
+        screenStreamActive_ = false;
+        reconnectScreenAfterStreamStop_ = false;
+        restartScreenStreamAfterReconnect_ = false;
+        screenReconnectPending_ = false;
         lastFrameBytes_ = 0;
         lastFrameElapsedMs_ = 0;
+        lastEstimatedFullFrameBytes_ = 0;
+        lastDeltaSavePercent_ = 0.0;
+        currentStreamFrameId_ = 0;
+        currentStreamBaseFrameId_ = 0;
+        skippedDeltaFrameCount_ = 0;
+        requestedKeyFrameCount_ = 0;
+        lastStreamFrameType_ = 0;
+        lastStreamRectX_ = 0;
+        lastStreamRectY_ = 0;
+        lastStreamRectWidth_ = 0;
+        lastStreamRectHeight_ = 0;
+        lastStreamRectCount_ = 0;
+        lastCaptureMs_ = 0;
+        lastCompareMs_ = 0;
+        lastEncodeMs_ = 0;
+        lastPreviousSendMs_ = 0;
+        lastFallbackToKeyFrame_ = 0;
+        keyFrameRequestPending_ = false;
+        if (autoRefreshButton_) {
+            autoRefreshButton_->setText("Start Stream");
+        }
         if (inputRefreshTimer_) {
             inputRefreshTimer_->stop();
+        }
+        if (screenReconnectTimer_) {
+            screenReconnectTimer_->stop();
         }
     }
 
@@ -640,8 +868,8 @@ void MainWindow::setConnected(bool connected)
     listDrivesButton_->setEnabled(connected && !busy_);
     listDirButton_->setEnabled(connected && !busy_);
     downloadButton_->setEnabled(connected && !busy_);
-    screenshotButton_->setEnabled(connected && !screenBusy_);
-    autoRefreshButton_->setEnabled(connected);
+    screenshotButton_->setEnabled(connected && screenConnected_ && !screenBusy_ && !screenStreamActive_);
+    autoRefreshButton_->setEnabled(connected && screenConnected_);
     hostInput_->setEnabled(!connected);
     portInput_->setEnabled(!connected);
     qualityInput_->setEnabled(connected);
@@ -663,8 +891,8 @@ void MainWindow::setBusy(bool busy)
     listDrivesButton_->setEnabled(connected_ && !busy_);
     listDirButton_->setEnabled(connected_ && !busy_);
     downloadButton_->setEnabled(connected_ && !busy_);
-    screenshotButton_->setEnabled(connected_ && !screenBusy_);
-    autoRefreshButton_->setEnabled(connected_);
+    screenshotButton_->setEnabled(connected_ && screenConnected_ && !screenBusy_ && !screenStreamActive_);
+    autoRefreshButton_->setEnabled(connected_ && screenConnected_);
 
     if (!busy_) {
         statusBar()->showMessage(connected_ ? "Connected" : "Ready");
@@ -700,17 +928,143 @@ void MainWindow::showScreenshot(const QByteArray& imageData, const QString& imag
     remoteScreenHeight_ = screenHeight > 0 ? screenHeight : currentScreenshot_.height();
     updateScreenshotView();
 
-    const qint64 elapsedMs = screenshotRequestTimer_.isValid() ? screenshotRequestTimer_.elapsed() : 0;
+    const qint64 elapsedMs = screenStreamActive_ ? 0 : (screenshotRequestTimer_.isValid() ? screenshotRequestTimer_.elapsed() : 0);
     lastFrameBytes_ = imageData.size();
     lastFrameElapsedMs_ = elapsedMs;
     updateFrameStats(imageData.size(), elapsedMs);
     updateScreenStreamStatus();
 
-    QStringList results;
-    results.push_back("Screenshot loaded");
-    results.push_back(imageFormat + ", " + QString::number(imageData.size()) + " bytes");
-    results.push_back("Remote screen: " + QString::number(remoteScreenWidth_) + " x " + QString::number(remoteScreenHeight_));
-    showResults(results);
+    if (!screenStreamActive_) {
+        QStringList results;
+        results.push_back("Screenshot loaded");
+        results.push_back(imageFormat + ", " + QString::number(imageData.size()) + " bytes");
+        results.push_back("Remote screen: " + QString::number(remoteScreenWidth_) + " x " + QString::number(remoteScreenHeight_));
+        showResults(results);
+    }
+}
+
+void MainWindow::showScreenStreamFrame(
+    const QByteArray& imageData,
+    const QString& imageFormat,
+    int screenWidth,
+    int screenHeight,
+    int captureWidth,
+    int captureHeight,
+    int frameType,
+    quint64 frameId,
+    quint64 baseFrameId,
+    int rectX,
+    int rectY,
+    int rectWidth,
+    int rectHeight,
+    const QVector<int>& rectXs,
+    const QVector<int>& rectYs,
+    const QVector<int>& rectWidths,
+    const QVector<int>& rectHeights,
+    const QVector<qint64>& rectImageSizes,
+    qint64 estimatedFullImageSize,
+    int captureMs,
+    int compareMs,
+    int encodeMs,
+    int previousSendMs,
+    int fallbackToKeyFrame
+)
+{
+    if (frameType == SCREEN_STREAM_FRAME_KEY) {
+        QPixmap pixmap;
+        const QByteArray formatBytes = imageFormat.toLatin1();
+        if (!pixmap.loadFromData(imageData, formatBytes.constData())) {
+            appendLog("Failed to load key frame from memory");
+            return;
+        }
+
+        currentScreenshot_ = pixmap;
+        currentStreamFrameId_ = frameId;
+        currentStreamBaseFrameId_ = 0;
+        keyFrameRequestPending_ = false;
+    } else if (frameType == SCREEN_STREAM_FRAME_DELTA) {
+        if (currentScreenshot_.isNull() || currentStreamFrameId_ != baseFrameId) {
+            ++skippedDeltaFrameCount_;
+            appendLog("Delta frame skipped: frame="
+                      + QString::number(frameId)
+                      + " base=" + QString::number(baseFrameId)
+                      + " current=" + QString::number(currentStreamFrameId_));
+            if (!keyFrameRequestPending_ && screenWorker_) {
+                keyFrameRequestPending_ = true;
+                ++requestedKeyFrameCount_;
+                screenWorker_->requestKeyFrame();
+            }
+            updateScreenStreamStatus();
+            return;
+        }
+
+        qsizetype imageOffset = 0;
+        const int rectCount = rectImageSizes.size();
+        if (rectXs.size() != rectCount
+            || rectYs.size() != rectCount
+            || rectWidths.size() != rectCount
+            || rectHeights.size() != rectCount) {
+            appendLog("Delta frame skipped: invalid rect metadata");
+            return;
+        }
+
+        for (int i = 0; i < rectCount; ++i) {
+            const qint64 rectImageSize = rectImageSizes[i];
+            if (rectImageSize <= 0) {
+                continue;
+            }
+
+            if (imageOffset + rectImageSize > imageData.size()) {
+                appendLog("Delta frame skipped: invalid rect image size");
+                return;
+            }
+
+            const QByteArray rectData = imageData.mid(imageOffset, static_cast<qsizetype>(rectImageSize));
+            imageOffset += static_cast<qsizetype>(rectImageSize);
+
+            QPixmap rectPixmap;
+            const QByteArray formatBytes = imageFormat.toLatin1();
+            if (!rectPixmap.loadFromData(rectData, formatBytes.constData())) {
+                appendLog("Failed to load delta rect from memory");
+                return;
+            }
+
+            QPainter painter(&currentScreenshot_);
+            painter.drawPixmap(rectXs[i], rectYs[i], rectWidths[i], rectHeights[i], rectPixmap);
+        }
+
+        currentStreamFrameId_ = frameId;
+        currentStreamBaseFrameId_ = baseFrameId;
+    } else {
+        appendLog("Unknown screen frame type: " + QString::number(frameType));
+        return;
+    }
+
+    lastStreamFrameType_ = frameType;
+    lastStreamRectX_ = rectX;
+    lastStreamRectY_ = rectY;
+    lastStreamRectWidth_ = rectWidth;
+    lastStreamRectHeight_ = rectHeight;
+    lastStreamRectCount_ = rectImageSizes.size();
+    lastEstimatedFullFrameBytes_ = estimatedFullImageSize;
+    lastDeltaSavePercent_ = 0.0;
+    if (estimatedFullImageSize > 0 && imageData.size() <= estimatedFullImageSize) {
+        lastDeltaSavePercent_ = 100.0 * (1.0 - static_cast<double>(imageData.size()) / static_cast<double>(estimatedFullImageSize));
+    }
+    lastCaptureMs_ = captureMs;
+    lastCompareMs_ = compareMs;
+    lastEncodeMs_ = encodeMs;
+    lastPreviousSendMs_ = previousSendMs;
+    lastFallbackToKeyFrame_ = fallbackToKeyFrame;
+
+    remoteScreenWidth_ = screenWidth > 0 ? screenWidth : captureWidth;
+    remoteScreenHeight_ = screenHeight > 0 ? screenHeight : captureHeight;
+    updateScreenshotView();
+
+    lastFrameBytes_ = imageData.size();
+    lastFrameElapsedMs_ = 0;
+    updateFrameStats(imageData.size(), 0);
+    updateScreenStreamStatus();
 }
 
 void MainWindow::updateScreenshotView()
@@ -719,10 +1073,14 @@ void MainWindow::updateScreenshotView()
         return;
     }
 
+    const Qt::TransformationMode transformMode = screenStreamActive_
+        ? Qt::FastTransformation
+        : Qt::SmoothTransformation;
+
     screenshotLabel_->setPixmap(currentScreenshot_.scaled(
         screenshotLabel_->size(),
         Qt::KeepAspectRatio,
-        Qt::SmoothTransformation
+        transformMode
     ));
 }
 
@@ -735,6 +1093,12 @@ void MainWindow::updateScreenStreamStatus()
     QString state = "idle";
     if (!connected_) {
         state = "disconnected";
+    } else if (screenStreamActive_) {
+        state = "streaming";
+    } else if (screenReconnectPending_) {
+        state = "reconnecting screen";
+    } else if (!screenConnected_ && controlConnected_) {
+        state = "screen disconnected";
     } else if (screenBusy_) {
         state = "pulling frame";
     } else if (pendingScreenFrame_) {
@@ -752,6 +1116,38 @@ void MainWindow::updateScreenStreamStatus()
         if (lastFrameElapsedMs_ > 0) {
             text += "/" + QString::number(lastFrameElapsedMs_) + "ms";
         }
+    }
+
+    if (currentStreamFrameId_ > 0) {
+        text += ", frame=" + currentFrameTypeText()
+            + "#" + QString::number(currentStreamFrameId_);
+        if (currentStreamBaseFrameId_ > 0) {
+            text += "/base=" + QString::number(currentStreamBaseFrameId_);
+        }
+        text += ", rect=" + QString::number(lastStreamRectWidth_)
+            + "x" + QString::number(lastStreamRectHeight_)
+            + "@" + QString::number(lastStreamRectX_)
+            + "," + QString::number(lastStreamRectY_);
+        text += ", rectCount=" + QString::number(lastStreamRectCount_);
+        if (lastEstimatedFullFrameBytes_ > 0) {
+            text += ", full~=" + QString::number(lastEstimatedFullFrameBytes_ / 1024.0, 'f', 1) + "KB";
+            text += ", save=" + QString::number(lastDeltaSavePercent_, 'f', 1) + "%";
+        }
+        text += ", ms=c" + QString::number(lastCaptureMs_)
+            + "/cmp" + QString::number(lastCompareMs_)
+            + "/enc" + QString::number(lastEncodeMs_)
+            + "/prevSend" + QString::number(lastPreviousSendMs_);
+        if (lastFallbackToKeyFrame_ != 0) {
+            text += ", fallback=KEY";
+        }
+    }
+
+    if (skippedDeltaFrameCount_ > 0) {
+        text += ", skippedDelta=" + QString::number(skippedDeltaFrameCount_);
+    }
+
+    if (requestedKeyFrameCount_ > 0) {
+        text += ", keyReq=" + QString::number(requestedKeyFrameCount_);
     }
 
     if (screenFailureCount_ > 0) {
@@ -778,7 +1174,27 @@ void MainWindow::updateFrameStats(qint64 bytes, qint64 elapsedMs)
     }
 
     const double kb = bytes / 1024.0;
-    QString text = "Frame: " + QString::number(kb, 'f', 1) + " KB";
+    QString text = "Frame: ";
+    if (currentStreamFrameId_ > 0) {
+        text += currentFrameTypeText()
+            + " #" + QString::number(currentStreamFrameId_);
+        if (currentStreamBaseFrameId_ > 0) {
+            text += " base=" + QString::number(currentStreamBaseFrameId_);
+        }
+        text += " rect=" + QString::number(lastStreamRectWidth_)
+            + "x" + QString::number(lastStreamRectHeight_);
+        text += " rectCount=" + QString::number(lastStreamRectCount_);
+        if (lastEstimatedFullFrameBytes_ > 0) {
+            text += " save=" + QString::number(lastDeltaSavePercent_, 'f', 1) + "%";
+        }
+        text += " ms=c" + QString::number(lastCaptureMs_)
+            + "/cmp" + QString::number(lastCompareMs_)
+            + "/enc" + QString::number(lastEncodeMs_)
+            + "/prevSend" + QString::number(lastPreviousSendMs_);
+        text += ", ";
+    }
+
+    text += QString::number(kb, 'f', 1) + " KB";
     if (elapsedMs > 0) {
         text += ", " + QString::number(elapsedMs) + " ms";
     }
@@ -787,6 +1203,23 @@ void MainWindow::updateFrameStats(qint64 bytes, qint64 elapsedMs)
     }
 
     frameStatsLabel_->setText(text);
+}
+
+QString MainWindow::currentFrameTypeText() const
+{
+    if (lastStreamFrameType_ == SCREEN_STREAM_FRAME_KEY) {
+        return "KEY";
+    }
+
+    if (lastStreamFrameType_ == SCREEN_STREAM_FRAME_DELTA) {
+        if (lastStreamRectWidth_ == 0 || lastStreamRectHeight_ == 0) {
+            return "EMPTY_DELTA";
+        }
+
+        return "DELTA";
+    }
+
+    return "-";
 }
 
 bool MainWindow::mapScreenshotPoint(const QPoint& labelPoint, int& outRemoteX, int& outRemoteY) const
@@ -828,8 +1261,16 @@ void MainWindow::clickScreenshotAt(const QPoint& labelPoint, int button)
         return;
     }
 
+    appendLog("Map click: label "
+              + QString::number(labelPoint.x()) + ", " + QString::number(labelPoint.y())
+              + " -> remote " + QString::number(remoteX) + ", " + QString::number(remoteY)
+              + " / " + QString::number(remoteScreenWidth_) + "x" + QString::number(remoteScreenHeight_));
+
     QMetaObject::invokeMethod(worker_, [worker = worker_, remoteX, remoteY, button]() {
         worker->clickMouseAt(remoteX, remoteY, button);
+    }, Qt::QueuedConnection);
+    QMetaObject::invokeMethod(worker_, [worker = worker_, remoteX, remoteY]() {
+        worker->probeMousePosition(remoteX, remoteY);
     }, Qt::QueuedConnection);
     scheduleInputRefresh();
 }
@@ -845,6 +1286,11 @@ void MainWindow::sendRemoteMouseDown(const QPoint& labelPoint, int button)
     if (!mapScreenshotPoint(labelPoint, remoteX, remoteY)) {
         return;
     }
+
+    appendLog("Map down: label "
+              + QString::number(labelPoint.x()) + ", " + QString::number(labelPoint.y())
+              + " -> remote " + QString::number(remoteX) + ", " + QString::number(remoteY)
+              + " / " + QString::number(remoteScreenWidth_) + "x" + QString::number(remoteScreenHeight_));
 
     lastRemoteMoveX_ = remoteX;
     lastRemoteMoveY_ = remoteY;
@@ -897,6 +1343,9 @@ void MainWindow::sendRemoteMouseUp(const QPoint& labelPoint, int button)
 
     QMetaObject::invokeMethod(worker_, [worker = worker_, remoteX, remoteY, button]() {
         worker->mouseUpAt(remoteX, remoteY, button);
+    }, Qt::QueuedConnection);
+    QMetaObject::invokeMethod(worker_, [worker = worker_, remoteX, remoteY]() {
+        worker->probeMousePosition(remoteX, remoteY);
     }, Qt::QueuedConnection);
     scheduleInputRefresh();
 }

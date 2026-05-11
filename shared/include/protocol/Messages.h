@@ -75,6 +75,43 @@ struct ScreenshotStartResponse {
     std::string errorMessage;
 };
 
+struct ScreenStreamStartRequest {
+    uint32_t quality;
+    uint32_t scalePercent;
+    uint32_t intervalMs;
+};
+
+struct ScreenStreamRect {
+    uint32_t x;
+    uint32_t y;
+    uint32_t width;
+    uint32_t height;
+    uint64_t imageSize;
+};
+
+struct ScreenStreamFrameHeader {
+    uint64_t imageSize;
+    uint32_t screenWidth;
+    uint32_t screenHeight;
+    uint32_t captureWidth;
+    uint32_t captureHeight;
+    uint32_t frameType;
+    uint64_t frameId;
+    uint64_t baseFrameId;
+    uint32_t rectX;
+    uint32_t rectY;
+    uint32_t rectWidth;
+    uint32_t rectHeight;
+    uint32_t rectCount;
+    uint64_t estimatedFullImageSize;
+    uint32_t captureMs;
+    uint32_t compareMs;
+    uint32_t encodeMs;
+    uint32_t sendMs;
+    uint32_t fallbackToKeyFrame;
+    std::vector<ScreenStreamRect> rects;
+    std::string imageFormat;
+};
 
 ByteBuffer serializeDriveListResponse(const DriveListResponse& response);
 bool deserializeDriveListResponse(const ByteBuffer& payload, DriveListResponse& outResponse);
@@ -111,3 +148,9 @@ bool deserializeScreenshotStartRequest(const ByteBuffer& payload, ScreenshotStar
 
 ByteBuffer serializeScreenshotStartResponse(const ScreenshotStartResponse& response);
 bool deserializeScreenshotStartResponse(const ByteBuffer& payload, ScreenshotStartResponse& outResponse);
+
+ByteBuffer serializeScreenStreamStartRequest(const ScreenStreamStartRequest& request);
+bool deserializeScreenStreamStartRequest(const ByteBuffer& payload, ScreenStreamStartRequest& outRequest);
+
+ByteBuffer serializeScreenStreamFrameHeader(const ScreenStreamFrameHeader& header);
+bool deserializeScreenStreamFrameHeader(const ByteBuffer& payload, ScreenStreamFrameHeader& outHeader);

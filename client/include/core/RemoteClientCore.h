@@ -29,6 +29,10 @@ public:
     bool receiveDownloadChunks(const DownloadChunkHandler& onChunk, std::string& errorMessage);
     bool requestScreenshot(ScreenshotStartResponse& outResponse, std::string& errorMessage, uint32_t quality = 70, uint32_t scalePercent = 100);
     bool receiveScreenshotChunks(const DownloadChunkHandler& onChunk, std::string& errorMessage);
+    bool startScreenStream(uint32_t quality, uint32_t scalePercent, uint32_t intervalMs, std::string& errorMessage);
+    bool stopScreenStream(std::string& errorMessage);
+    bool requestScreenStreamKeyFrame(std::string& errorMessage);
+    bool receiveNextScreenStreamFrame(ScreenStreamFrameHeader& outHeader, ByteBuffer& outImage, std::string& errorMessage);
     bool moveMouse(int32_t x, int32_t y, std::string& errorMessage);
     bool sendMouseButton(uint32_t button, uint32_t action, std::string& errorMessage);
     bool clickMouse(uint32_t button, std::string& errorMessage);

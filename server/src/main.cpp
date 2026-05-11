@@ -1,11 +1,23 @@
 #include <iostream>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <windows.h>
 
 #include "ServerSession.h"
 #include "concurrency/ThreadPool.h"
 
+namespace {
+
+void enableDpiAwareCoordinateSystem()
+{
+    SetProcessDPIAware();
+}
+
+} // namespace
+
 int main() {
+    enableDpiAwareCoordinateSystem();
+
     std::cout << "RemoteServer protocol build: packet-v2-threadpool" << std::endl;
 
     WSADATA wsaData{};

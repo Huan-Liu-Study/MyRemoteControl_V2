@@ -25,6 +25,7 @@ public slots:
     void mouseMoveAt(int x, int y);
     void mouseUpAt(int x, int y, int button);
     void mouseWheelAt(int x, int y, int delta);
+    void probeMousePosition(int expectedX, int expectedY);
     void keyDown(int virtualKey);
     void keyUp(int virtualKey);
 
@@ -35,6 +36,7 @@ signals:
     void driveListReceived(QStringList drives);
     void directoryListReceived(QStringList entries);
     void downloadFinished(QString localPath);
+    void mousePositionProbed(int expectedX, int expectedY, int actualX, int actualY);
     void requestFinished();
 
 private:

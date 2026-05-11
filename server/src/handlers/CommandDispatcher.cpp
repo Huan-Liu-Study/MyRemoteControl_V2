@@ -56,6 +56,11 @@ bool dispatchCommand(SOCKET clientSock, const ParsedPacket& request)
         return handleScreenshotStart(clientSock, request.payload);
     }
 
+    if (request.header.command == CMD::CMD_SCREEN_STREAM_START) {
+        std::cout << "Received CMD_SCREEN_STREAM_START command." << std::endl;
+        return handleScreenStreamStart(clientSock, request.payload);
+    }
+
     std::cout << "Received unknown command: " << request.header.command << std::endl;
     return sendPacket(clientSock, CMD::CMD_ERROR, "Unknown command.");
 }

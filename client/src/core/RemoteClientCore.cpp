@@ -287,6 +287,120 @@ bool RemoteClientCore::receiveScreenshotChunks(const DownloadChunkHandler& onChu
     }
 }
 
+bool RemoteClientCore::startScreenStream(uint32_t quality, uint32_t scalePercent, uint32_t intervalMs, std::string& errorMessage)
+{
+    if (!isConnected()) {
+        errorMessage = "Not connected";
+        return false;
+    }
+
+    ScreenStreamStartRequest request{};
+    request.quality = quality;
+    request.scalePercent = scalePercent;
+    request.intervalMs = intervalMs;
+
+    if (!sendPacket(toSocket(socket_), CMD::CMD_SCREEN_STREAM_START, serializeScreenStreamStartRequest(request))) {
+        errorMessage = "Failed to send screen stream start request";
+        return false;
+    }
+
+    errorMessage.clear();
+    return true;
+}
+
+bool RemoteClientCore::stopScreenStream(std::string& errorMessage)
+{
+    if (!isConnected()) {
+        errorMessage = "Not connected";
+        return false;
+    }
+
+    if (!sendPacket(toSocket(socket_), CMD::CMD_SCREEN_STREAM_STOP)) {
+        errorMessage = "Failed to send screen stream stop request";
+        return false;
+    }
+
+    errorMessage.clear();
+    return true;
+}
+
+bool RemoteClientCore::requestScreenStreamKeyFrame(std::string& errorMessage)
+{
+    if (!isConnected()) {
+        errorMessage = "Not connected";
+        return false;
+    }
+
+    if (!sendPacket(toSocket(socket_), CMD::CMD_SCREEN_STREAM_KEYFRAME_REQUEST)) {
+        errorMessage = "Failed to send screen stream key frame request";
+        return false;
+    }
+
+    errorMessage.clear();
+    return true;
+}
+
+bool RemoteClientCore::receiveNextScreenStreamFrame(ScreenStreamFrameHeader& outHeader, ByteBuffer& outImage, std::string& errorMessage)
+{
+    if (!isConnected()) {
+        errorMessage = "Not connected";
+        return false;
+    }
+
+    ParsedPacket startPacket{};
+    if (!recvPacket(toSocket(socket_), startPacket)) {
+        errorMessage = wsaErrorText("recvPacket");
+        return false;
+    }
+
+    if (startPacket.header.command == CMD::CMD_ERROR) {
+        errorMessage = "Server error during screen stream: " + PacketCodec::bytesToString(startPacket.payload);
+        return false;
+    }
+
+    if (startPacket.header.command != CMD::CMD_SCREEN_STREAM_FRAME_START) {
+        errorMessage = "Unexpected screen stream packet: " + std::to_string(startPacket.header.command);
+        return false;
+    }
+
+    ScreenStreamFrameHeader header{};
+    if (!deserializeScreenStreamFrameHeader(startPacket.payload, header)) {
+        errorMessage = "Failed to parse screen stream frame header";
+        return false;
+    }
+
+    ByteBuffer image;
+    image.reserve(static_cast<size_t>(header.imageSize));
+
+    while (true) {
+        ParsedPacket chunkPacket{};
+        if (!recvPacket(toSocket(socket_), chunkPacket)) {
+            errorMessage = wsaErrorText("recvPacket");
+            return false;
+        }
+
+        if (chunkPacket.header.command == CMD::CMD_SCREEN_STREAM_FRAME_CHUNK) {
+            image.insert(image.end(), chunkPacket.payload.begin(), chunkPacket.payload.end());
+            continue;
+        }
+
+        if (chunkPacket.header.command == CMD::CMD_SCREEN_STREAM_FRAME_END) {
+            outHeader = std::move(header);
+            outImage = std::move(image);
+            errorMessage.clear();
+            return true;
+        }
+
+        if (chunkPacket.header.command == CMD::CMD_ERROR) {
+            errorMessage = "Server error during screen stream frame: " + PacketCodec::bytesToString(chunkPacket.payload);
+            return false;
+        }
+
+        errorMessage = "Unexpected screen stream frame packet: " + std::to_string(chunkPacket.header.command);
+        return false;
+    }
+}
+
 bool RemoteClientCore::moveMouse(int32_t x, int32_t y, std::string& errorMessage)
 {
     if (!isConnected()) {

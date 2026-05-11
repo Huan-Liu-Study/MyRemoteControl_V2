@@ -287,6 +287,22 @@ void RemoteClientWorker::mouseWheelAt(int x, int y, int delta)
     }
 }
 
+void RemoteClientWorker::probeMousePosition(int expectedX, int expectedY)
+{
+    if (!isConnected()) {
+        return;
+    }
+
+    std::string errorMessage;
+    MousePositionResponse position{};
+    if (!client_.getMousePosition(position, errorMessage)) {
+        emit logMessage(toQString(errorMessage));
+        return;
+    }
+
+    emit mousePositionProbed(expectedX, expectedY, position.x, position.y);
+}
+
 void RemoteClientWorker::keyDown(int virtualKey)
 {
     if (!isConnected()) {

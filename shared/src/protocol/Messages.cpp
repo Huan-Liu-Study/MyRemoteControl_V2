@@ -338,3 +338,106 @@ bool deserializeScreenshotStartResponse(const ByteBuffer& payload, ScreenshotSta
 
     return reader.isFinished();
 }
+
+ByteBuffer serializeScreenStreamStartRequest(const ScreenStreamStartRequest& request)
+{
+    BinaryWriter writer;
+    writer.writeUint32(request.quality);
+    writer.writeUint32(request.scalePercent);
+    writer.writeUint32(request.intervalMs);
+    return writer.buffer();
+}
+
+bool deserializeScreenStreamStartRequest(const ByteBuffer& payload, ScreenStreamStartRequest& outRequest)
+{
+    BinaryReader reader(payload);
+
+    if (!reader.readUint32(outRequest.quality)
+        || !reader.readUint32(outRequest.scalePercent)
+        || !reader.readUint32(outRequest.intervalMs)) {
+        return false;
+    }
+
+    return reader.isFinished();
+}
+
+ByteBuffer serializeScreenStreamFrameHeader(const ScreenStreamFrameHeader& header)
+{
+    BinaryWriter writer;
+    writer.writeUint64(header.imageSize);
+    writer.writeUint32(header.screenWidth);
+    writer.writeUint32(header.screenHeight);
+    writer.writeUint32(header.captureWidth);
+    writer.writeUint32(header.captureHeight);
+    writer.writeUint32(header.frameType);
+    writer.writeUint64(header.frameId);
+    writer.writeUint64(header.baseFrameId);
+    writer.writeUint32(header.rectX);
+    writer.writeUint32(header.rectY);
+    writer.writeUint32(header.rectWidth);
+    writer.writeUint32(header.rectHeight);
+    writer.writeUint32(static_cast<uint32_t>(header.rects.size()));
+    writer.writeUint64(header.estimatedFullImageSize);
+    writer.writeUint32(header.captureMs);
+    writer.writeUint32(header.compareMs);
+    writer.writeUint32(header.encodeMs);
+    writer.writeUint32(header.sendMs);
+    writer.writeUint32(header.fallbackToKeyFrame);
+    for (const ScreenStreamRect& rect : header.rects) {
+        writer.writeUint32(rect.x);
+        writer.writeUint32(rect.y);
+        writer.writeUint32(rect.width);
+        writer.writeUint32(rect.height);
+        writer.writeUint64(rect.imageSize);
+    }
+    writer.writeString(header.imageFormat);
+    return writer.buffer();
+}
+
+bool deserializeScreenStreamFrameHeader(const ByteBuffer& payload, ScreenStreamFrameHeader& outHeader)
+{
+    BinaryReader reader(payload);
+
+    if (!reader.readUint64(outHeader.imageSize)
+        || !reader.readUint32(outHeader.screenWidth)
+        || !reader.readUint32(outHeader.screenHeight)
+        || !reader.readUint32(outHeader.captureWidth)
+        || !reader.readUint32(outHeader.captureHeight)
+        || !reader.readUint32(outHeader.frameType)
+        || !reader.readUint64(outHeader.frameId)
+        || !reader.readUint64(outHeader.baseFrameId)
+        || !reader.readUint32(outHeader.rectX)
+        || !reader.readUint32(outHeader.rectY)
+        || !reader.readUint32(outHeader.rectWidth)
+        || !reader.readUint32(outHeader.rectHeight)
+        || !reader.readUint32(outHeader.rectCount)
+        || !reader.readUint64(outHeader.estimatedFullImageSize)
+        || !reader.readUint32(outHeader.captureMs)
+        || !reader.readUint32(outHeader.compareMs)
+        || !reader.readUint32(outHeader.encodeMs)
+        || !reader.readUint32(outHeader.sendMs)
+        || !reader.readUint32(outHeader.fallbackToKeyFrame)) {
+        return false;
+    }
+
+    std::vector<ScreenStreamRect> rects;
+    rects.reserve(outHeader.rectCount);
+    for (uint32_t i = 0; i < outHeader.rectCount; ++i) {
+        ScreenStreamRect rect{};
+        if (!reader.readUint32(rect.x)
+            || !reader.readUint32(rect.y)
+            || !reader.readUint32(rect.width)
+            || !reader.readUint32(rect.height)
+            || !reader.readUint64(rect.imageSize)) {
+            return false;
+        }
+        rects.push_back(rect);
+    }
+
+    if (!reader.readString(outHeader.imageFormat)) {
+        return false;
+    }
+
+    outHeader.rects = std::move(rects);
+    return reader.isFinished();
+}
