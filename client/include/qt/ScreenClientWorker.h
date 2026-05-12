@@ -19,8 +19,8 @@ public:
 public slots:
     void connectToServer(QString host, int port);
     void disconnectFromServer();
-    void takeScreenshot(int quality, int scalePercent);
-    void startScreenStream(int quality, int scalePercent, int intervalMs);
+    void takeScreenshot(int quality);
+    void startScreenStream(int quality, int intervalMs);
     void stopScreenStream();
     void requestKeyFrame();
 
@@ -50,6 +50,8 @@ signals:
         QVector<qint64> rectImageSizes,
         qint64 estimatedFullImageSize,
         int captureMs,
+        int bltMs,
+        int copyMs,
         int compareMs,
         int encodeMs,
         int previousSendMs,

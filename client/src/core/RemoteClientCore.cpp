@@ -221,7 +221,7 @@ bool RemoteClientCore::receiveDownloadChunks(const DownloadChunkHandler& onChunk
     }
 }
 
-bool RemoteClientCore::requestScreenshot(ScreenshotStartResponse& outResponse, std::string& errorMessage, uint32_t quality, uint32_t scalePercent)
+bool RemoteClientCore::requestScreenshot(ScreenshotStartResponse& outResponse, std::string& errorMessage, uint32_t quality)
 {
     if (!isConnected()) {
         errorMessage = "Not connected";
@@ -230,7 +230,6 @@ bool RemoteClientCore::requestScreenshot(ScreenshotStartResponse& outResponse, s
 
     ScreenshotStartRequest request{};
     request.quality = quality;
-    request.scalePercent = scalePercent;
 
     if (!sendPacket(toSocket(socket_), CMD::CMD_SCREENSHOT_START, serializeScreenshotStartRequest(request))) {
         errorMessage = "Failed to send screenshot request";
@@ -287,7 +286,7 @@ bool RemoteClientCore::receiveScreenshotChunks(const DownloadChunkHandler& onChu
     }
 }
 
-bool RemoteClientCore::startScreenStream(uint32_t quality, uint32_t scalePercent, uint32_t intervalMs, std::string& errorMessage)
+bool RemoteClientCore::startScreenStream(uint32_t quality, uint32_t intervalMs, std::string& errorMessage)
 {
     if (!isConnected()) {
         errorMessage = "Not connected";
@@ -296,7 +295,6 @@ bool RemoteClientCore::startScreenStream(uint32_t quality, uint32_t scalePercent
 
     ScreenStreamStartRequest request{};
     request.quality = quality;
-    request.scalePercent = scalePercent;
     request.intervalMs = intervalMs;
 
     if (!sendPacket(toSocket(socket_), CMD::CMD_SCREEN_STREAM_START, serializeScreenStreamStartRequest(request))) {

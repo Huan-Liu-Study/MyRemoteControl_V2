@@ -62,7 +62,6 @@ struct MouseWheelRequest {
 
 struct ScreenshotStartRequest {
     uint32_t quality;
-    uint32_t scalePercent;
 };
 
 struct ScreenshotStartResponse {
@@ -77,7 +76,6 @@ struct ScreenshotStartResponse {
 
 struct ScreenStreamStartRequest {
     uint32_t quality;
-    uint32_t scalePercent;
     uint32_t intervalMs;
 };
 
@@ -105,6 +103,8 @@ struct ScreenStreamFrameHeader {
     uint32_t rectCount;
     uint64_t estimatedFullImageSize;
     uint32_t captureMs;
+    uint32_t bltMs;
+    uint32_t copyMs;
     uint32_t compareMs;
     uint32_t encodeMs;
     uint32_t sendMs;

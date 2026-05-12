@@ -171,25 +171,23 @@ void testMouseWheelRequestRoundTrip() {
 }
 
 void testScreenshotStartRequestRoundTrip() {
-    ScreenshotStartRequest request{85u, 50u};
+    ScreenshotStartRequest request{85u};
 
     ByteBuffer payload = serializeScreenshotStartRequest(request);
 
     ScreenshotStartRequest decoded{};
     expectTrue(deserializeScreenshotStartRequest(payload, decoded), "screenshot request deserialize should succeed");
     expectTrue(decoded.quality == 85u, "screenshot quality mismatch");
-    expectTrue(decoded.scalePercent == 50u, "screenshot scale mismatch");
 }
 
 void testScreenStreamStartRequestRoundTrip() {
-    ScreenStreamStartRequest request{75u, 50u, 200u};
+    ScreenStreamStartRequest request{75u, 200u};
 
     ByteBuffer payload = serializeScreenStreamStartRequest(request);
 
     ScreenStreamStartRequest decoded{};
     expectTrue(deserializeScreenStreamStartRequest(payload, decoded), "screen stream request deserialize should succeed");
     expectTrue(decoded.quality == 75u, "screen stream quality mismatch");
-    expectTrue(decoded.scalePercent == 50u, "screen stream scale mismatch");
     expectTrue(decoded.intervalMs == 200u, "screen stream interval mismatch");
 }
 
@@ -210,6 +208,8 @@ void testScreenStreamFrameHeaderRoundTrip() {
         2u,
         200000u,
         8u,
+        6u,
+        2u,
         3u,
         12u,
         2u,
@@ -240,6 +240,8 @@ void testScreenStreamFrameHeaderRoundTrip() {
     expectTrue(decoded.rectCount == 2u, "screen stream rect count mismatch");
     expectTrue(decoded.estimatedFullImageSize == 200000u, "screen stream full estimate mismatch");
     expectTrue(decoded.captureMs == 8u, "screen stream capture ms mismatch");
+    expectTrue(decoded.bltMs == 6u, "screen stream blt ms mismatch");
+    expectTrue(decoded.copyMs == 2u, "screen stream copy ms mismatch");
     expectTrue(decoded.compareMs == 3u, "screen stream compare ms mismatch");
     expectTrue(decoded.encodeMs == 12u, "screen stream encode ms mismatch");
     expectTrue(decoded.sendMs == 2u, "screen stream send ms mismatch");

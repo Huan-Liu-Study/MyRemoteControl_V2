@@ -1,7 +1,10 @@
 #include "qt/MainWindow.h"
 
+#include <algorithm>
+
 #include <QFormLayout>
 #include <QFileDialog>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -13,9 +16,12 @@
 #include <QPainter>
 #include <QPixmap>
 #include <QPushButton>
+#include <QRect>
 #include <QResizeEvent>
 #include <QSize>
+#include <QSizePolicy>
 #include <QSpinBox>
+#include <QSplitter>
 #include <QStatusBar>
 #include <QThread>
 #include <QTimer>
@@ -87,6 +93,60 @@ int qtKeyToVirtualKey(int key)
 
 } // namespace
 
+RemoteScreenView::RemoteScreenView(QWidget* parent)
+    : QWidget(parent)
+{
+}
+
+void RemoteScreenView::setImage(const QPixmap& image, Qt::TransformationMode mode)
+{
+    image_ = image;
+    transformMode_ = mode;
+    update();
+}
+
+QRect RemoteScreenView::imageRect() const
+{
+    if (image_.isNull() || width() <= 0 || height() <= 0) {
+        return {};
+    }
+
+    QSize scaledSize = image_.size();
+    if (scaledSize.width() > width() || scaledSize.height() > height()) {
+        scaledSize.scale(size(), Qt::KeepAspectRatio);
+    }
+    const int x = (width() - scaledSize.width()) / 2;
+    const int y = (height() - scaledSize.height()) / 2;
+    return QRect(QPoint(x, y), scaledSize);
+}
+
+void RemoteScreenView::resizeEvent(QResizeEvent* event)
+{
+    QWidget::resizeEvent(event);
+    update();
+}
+
+void RemoteScreenView::paintEvent(QPaintEvent* event)
+{
+    (void)event;
+    QPainter painter(this);
+    painter.fillRect(rect(), QColor(32, 32, 32));
+
+    if (image_.isNull()) {
+        painter.setPen(QColor(220, 220, 220));
+        painter.drawText(rect(), Qt::AlignCenter, "No screenshot");
+        return;
+    }
+
+    const QRect target = imageRect();
+    if (target.size() == image_.size()) {
+        painter.drawPixmap(target.topLeft(), image_);
+        return;
+    }
+
+    painter.drawPixmap(target, image_);
+}
+
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
@@ -103,12 +163,12 @@ MainWindow::~MainWindow()
 void MainWindow::buildUi()
 {
     setWindowTitle("Remote Client");
-    resize(900, 640);
+    resize(1200, 760);
 
     QWidget* central = new QWidget(this);
     QVBoxLayout* mainLayout = new QVBoxLayout(central);
-    mainLayout->setContentsMargins(12, 12, 12, 8);
-    mainLayout->setSpacing(8);
+    mainLayout->setContentsMargins(8, 8, 8, 6);
+    mainLayout->setSpacing(6);
 
     hostInput_ = new QLineEdit(this);
     hostInput_->setText("127.0.0.1");
@@ -121,11 +181,6 @@ void MainWindow::buildUi()
     qualityInput_->setRange(10, 95);
     qualityInput_->setValue(60);
 
-    scaleInput_ = new QSpinBox(this);
-    scaleInput_->setRange(25, 100);
-    scaleInput_->setSingleStep(25);
-    scaleInput_->setValue(75);
-
     refreshIntervalInput_ = new QSpinBox(this);
     refreshIntervalInput_->setRange(100, 5000);
     refreshIntervalInput_->setSingleStep(50);
@@ -133,14 +188,6 @@ void MainWindow::buildUi()
 
     pathInput_ = new QLineEdit(this);
     pathInput_->setPlaceholderText("C:\\");
-
-    QFormLayout* formLayout = new QFormLayout;
-    formLayout->addRow("Host", hostInput_);
-    formLayout->addRow("Port", portInput_);
-    formLayout->addRow("JPEG Quality", qualityInput_);
-    formLayout->addRow("Scale %", scaleInput_);
-    formLayout->addRow("Refresh ms", refreshIntervalInput_);
-    formLayout->addRow("Path", pathInput_);
 
     connectButton_ = new QPushButton("Connect", this);
     disconnectButton_ = new QPushButton("Disconnect", this);
@@ -150,25 +197,18 @@ void MainWindow::buildUi()
     screenshotButton_ = new QPushButton("Screenshot", this);
     autoRefreshButton_ = new QPushButton("Start Stream", this);
 
-    QHBoxLayout* buttonLayout = new QHBoxLayout;
-    buttonLayout->addWidget(connectButton_);
-    buttonLayout->addWidget(disconnectButton_);
-    buttonLayout->addWidget(listDrivesButton_);
-    buttonLayout->addWidget(listDirButton_);
-    buttonLayout->addWidget(downloadButton_);
-    buttonLayout->addWidget(screenshotButton_);
-    buttonLayout->addWidget(autoRefreshButton_);
-
     statusLabel_ = new QLabel("Disconnected", this);
     frameStatsLabel_ = new QLabel("Frame: -", this);
     streamStateLabel_ = new QLabel("Screen stream: idle", this);
+    frameStatsLabel_->setWordWrap(true);
+    streamStateLabel_->setWordWrap(true);
 
     resultList_ = new QListWidget(this);
-    resultList_->setMaximumHeight(100);
+    resultList_->setMinimumHeight(110);
 
-    screenshotLabel_ = new QLabel("No screenshot", this);
-    screenshotLabel_->setAlignment(Qt::AlignCenter);
-    screenshotLabel_->setMinimumHeight(300);
+    screenshotLabel_ = new RemoteScreenView(this);
+    screenshotLabel_->setMinimumSize(320, 200);
+    screenshotLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     screenshotLabel_->setCursor(Qt::CrossCursor);
     screenshotLabel_->setFocusPolicy(Qt::StrongFocus);
     screenshotLabel_->installEventFilter(this);
@@ -176,16 +216,79 @@ void MainWindow::buildUi()
 
     logView_ = new QPlainTextEdit(this);
     logView_->setReadOnly(true);
-    logView_->setMaximumHeight(120);
+    logView_->setMinimumHeight(130);
 
-    mainLayout->addLayout(formLayout);
-    mainLayout->addLayout(buttonLayout);
-    mainLayout->addWidget(statusLabel_);
-    mainLayout->addWidget(frameStatsLabel_);
-    mainLayout->addWidget(streamStateLabel_);
-    mainLayout->addWidget(screenshotLabel_, 1);
-    mainLayout->addWidget(resultList_);
-    mainLayout->addWidget(logView_);
+    mainSplitter_ = new QSplitter(Qt::Horizontal, this);
+    mainSplitter_->setChildrenCollapsible(false);
+
+    QWidget* screenPanel = new QWidget(mainSplitter_);
+    QVBoxLayout* screenLayout = new QVBoxLayout(screenPanel);
+    screenLayout->setContentsMargins(0, 0, 0, 0);
+    screenLayout->setSpacing(6);
+    screenLayout->addWidget(screenshotLabel_, 1);
+    screenLayout->addWidget(frameStatsLabel_);
+    mainSplitter_->addWidget(screenPanel);
+
+    QWidget* sidePanel = new QWidget(mainSplitter_);
+    sidePanel->setMinimumWidth(260);
+    sidePanel->setMaximumWidth(340);
+    QVBoxLayout* sideLayout = new QVBoxLayout(sidePanel);
+    sideLayout->setContentsMargins(8, 0, 0, 0);
+    sideLayout->setSpacing(8);
+
+    QGroupBox* connectionBox = new QGroupBox("Connection", sidePanel);
+    QVBoxLayout* connectionLayout = new QVBoxLayout(connectionBox);
+    QFormLayout* connectionForm = new QFormLayout;
+    connectionForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    connectionForm->addRow("Host", hostInput_);
+    connectionForm->addRow("Port", portInput_);
+    QHBoxLayout* connectionButtons = new QHBoxLayout;
+    connectionButtons->addWidget(connectButton_);
+    connectionButtons->addWidget(disconnectButton_);
+    connectionLayout->addLayout(connectionForm);
+    connectionLayout->addLayout(connectionButtons);
+
+    QGroupBox* screenBox = new QGroupBox("Screen", sidePanel);
+    QVBoxLayout* screenBoxLayout = new QVBoxLayout(screenBox);
+    QFormLayout* screenForm = new QFormLayout;
+    screenForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    screenForm->addRow("JPEG Quality", qualityInput_);
+    screenForm->addRow("Refresh ms", refreshIntervalInput_);
+    QHBoxLayout* screenButtons = new QHBoxLayout;
+    screenButtons->addWidget(screenshotButton_);
+    screenButtons->addWidget(autoRefreshButton_);
+    screenBoxLayout->addLayout(screenForm);
+    screenBoxLayout->addLayout(screenButtons);
+
+    QGroupBox* filesBox = new QGroupBox("Files", sidePanel);
+    QVBoxLayout* filesLayout = new QVBoxLayout(filesBox);
+    QFormLayout* filesForm = new QFormLayout;
+    filesForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    filesForm->addRow("Path", pathInput_);
+    QHBoxLayout* fileButtons = new QHBoxLayout;
+    fileButtons->addWidget(listDrivesButton_);
+    fileButtons->addWidget(listDirButton_);
+    fileButtons->addWidget(downloadButton_);
+    filesLayout->addLayout(filesForm);
+    filesLayout->addLayout(fileButtons);
+
+    QGroupBox* statusBox = new QGroupBox("Status", sidePanel);
+    QVBoxLayout* statusLayout = new QVBoxLayout(statusBox);
+    statusLayout->addWidget(statusLabel_);
+    statusLayout->addWidget(streamStateLabel_);
+
+    sideLayout->addWidget(connectionBox);
+    sideLayout->addWidget(screenBox);
+    sideLayout->addWidget(filesBox);
+    sideLayout->addWidget(statusBox);
+    sideLayout->addWidget(resultList_, 1);
+    sideLayout->addWidget(logView_, 1);
+    mainSplitter_->addWidget(sidePanel);
+
+    mainSplitter_->setStretchFactor(0, 1);
+    mainSplitter_->setStretchFactor(1, 0);
+    mainSplitter_->setSizes({920, 280});
+    mainLayout->addWidget(mainSplitter_, 1);
 
     setCentralWidget(central);
     statusBar()->showMessage("Ready");
@@ -423,10 +526,9 @@ void MainWindow::startNetworkThread()
             appendLog("Screen stream restarting after reconnect");
 
             const int quality = qualityInput_->value();
-            const int scalePercent = scaleInput_->value();
             const int intervalMs = refreshIntervalInput_->value();
-            QMetaObject::invokeMethod(screenWorker_, [worker = screenWorker_, quality, scalePercent, intervalMs]() {
-                worker->startScreenStream(quality, scalePercent, intervalMs);
+            QMetaObject::invokeMethod(screenWorker_, [worker = screenWorker_, quality, intervalMs]() {
+                worker->startScreenStream(quality, intervalMs);
             }, Qt::QueuedConnection);
             updateScreenStreamStatus();
         }
@@ -490,6 +592,8 @@ void MainWindow::startNetworkThread()
         QVector<qint64> rectImageSizes,
         qint64 estimatedFullImageSize,
         int captureMs,
+        int bltMs,
+        int copyMs,
         int compareMs,
         int encodeMs,
         int previousSendMs,
@@ -516,6 +620,8 @@ void MainWindow::startNetworkThread()
             rectImageSizes,
             estimatedFullImageSize,
             captureMs,
+            bltMs,
+            copyMs,
             compareMs,
             encodeMs,
             previousSendMs,
@@ -739,9 +845,8 @@ void MainWindow::requestScreenFrame()
     setConnected(connected_);
     updateScreenStreamStatus();
     const int quality = qualityInput_->value();
-    const int scalePercent = scaleInput_->value();
-    QMetaObject::invokeMethod(screenWorker_, [worker = screenWorker_, quality, scalePercent]() {
-        worker->takeScreenshot(quality, scalePercent);
+    QMetaObject::invokeMethod(screenWorker_, [worker = screenWorker_, quality]() {
+        worker->takeScreenshot(quality);
     }, Qt::QueuedConnection);
 }
 
@@ -769,10 +874,9 @@ void MainWindow::toggleScreenStream()
     updateScreenStreamStatus();
 
     const int quality = qualityInput_->value();
-    const int scalePercent = scaleInput_->value();
     const int intervalMs = refreshIntervalInput_->value();
-    QMetaObject::invokeMethod(screenWorker_, [worker = screenWorker_, quality, scalePercent, intervalMs]() {
-        worker->startScreenStream(quality, scalePercent, intervalMs);
+    QMetaObject::invokeMethod(screenWorker_, [worker = screenWorker_, quality, intervalMs]() {
+        worker->startScreenStream(quality, intervalMs);
     }, Qt::QueuedConnection);
 }
 
@@ -849,6 +953,8 @@ void MainWindow::setConnected(bool connected)
         lastEncodeMs_ = 0;
         lastPreviousSendMs_ = 0;
         lastFallbackToKeyFrame_ = 0;
+        remoteScreenWidth_ = 0;
+        remoteScreenHeight_ = 0;
         keyFrameRequestPending_ = false;
         if (autoRefreshButton_) {
             autoRefreshButton_->setText("Start Stream");
@@ -873,7 +979,6 @@ void MainWindow::setConnected(bool connected)
     hostInput_->setEnabled(!connected);
     portInput_->setEnabled(!connected);
     qualityInput_->setEnabled(connected);
-    scaleInput_->setEnabled(connected);
     refreshIntervalInput_->setEnabled(connected);
     pathInput_->setEnabled(connected);
 
@@ -964,6 +1069,8 @@ void MainWindow::showScreenStreamFrame(
     const QVector<qint64>& rectImageSizes,
     qint64 estimatedFullImageSize,
     int captureMs,
+    int bltMs,
+    int copyMs,
     int compareMs,
     int encodeMs,
     int previousSendMs,
@@ -1052,6 +1159,8 @@ void MainWindow::showScreenStreamFrame(
         lastDeltaSavePercent_ = 100.0 * (1.0 - static_cast<double>(imageData.size()) / static_cast<double>(estimatedFullImageSize));
     }
     lastCaptureMs_ = captureMs;
+    lastBltMs_ = bltMs;
+    lastCopyMs_ = copyMs;
     lastCompareMs_ = compareMs;
     lastEncodeMs_ = encodeMs;
     lastPreviousSendMs_ = previousSendMs;
@@ -1077,11 +1186,7 @@ void MainWindow::updateScreenshotView()
         ? Qt::FastTransformation
         : Qt::SmoothTransformation;
 
-    screenshotLabel_->setPixmap(currentScreenshot_.scaled(
-        screenshotLabel_->size(),
-        Qt::KeepAspectRatio,
-        transformMode
-    ));
+    screenshotLabel_->setImage(currentScreenshot_, transformMode);
 }
 
 void MainWindow::updateScreenStreamStatus()
@@ -1108,7 +1213,6 @@ void MainWindow::updateScreenStreamStatus()
     QString text = "Screen stream: " + state;
     text += ", pending=" + QString(pendingScreenFrame_ ? "yes" : "no");
     text += ", quality=" + QString::number(qualityInput_ ? qualityInput_->value() : 0);
-    text += ", scale=" + QString::number(scaleInput_ ? scaleInput_->value() : 0) + "%";
     text += ", interval=" + QString::number(refreshIntervalInput_ ? refreshIntervalInput_->value() : 0) + "ms";
 
     if (lastFrameBytes_ > 0) {
@@ -1134,6 +1238,8 @@ void MainWindow::updateScreenStreamStatus()
             text += ", save=" + QString::number(lastDeltaSavePercent_, 'f', 1) + "%";
         }
         text += ", ms=c" + QString::number(lastCaptureMs_)
+            + "/blt" + QString::number(lastBltMs_)
+            + "/copy" + QString::number(lastCopyMs_)
             + "/cmp" + QString::number(lastCompareMs_)
             + "/enc" + QString::number(lastEncodeMs_)
             + "/prevSend" + QString::number(lastPreviousSendMs_);
@@ -1188,6 +1294,8 @@ void MainWindow::updateFrameStats(qint64 bytes, qint64 elapsedMs)
             text += " save=" + QString::number(lastDeltaSavePercent_, 'f', 1) + "%";
         }
         text += " ms=c" + QString::number(lastCaptureMs_)
+            + "/blt" + QString::number(lastBltMs_)
+            + "/copy" + QString::number(lastCopyMs_)
             + "/cmp" + QString::number(lastCompareMs_)
             + "/enc" + QString::number(lastEncodeMs_)
             + "/prevSend" + QString::number(lastPreviousSendMs_);
@@ -1224,28 +1332,34 @@ QString MainWindow::currentFrameTypeText() const
 
 bool MainWindow::mapScreenshotPoint(const QPoint& labelPoint, int& outRemoteX, int& outRemoteY) const
 {
-    if (currentScreenshot_.isNull()) {
+    if (!screenshotLabel_ || currentScreenshot_.isNull()) {
         return false;
     }
 
-    const QSize labelSize = screenshotLabel_->size();
-    const QSize imageSize = currentScreenshot_.size();
-    const QSize scaledSize = imageSize.scaled(labelSize, Qt::KeepAspectRatio);
-
-    const int offsetX = (labelSize.width() - scaledSize.width()) / 2;
-    const int offsetY = (labelSize.height() - scaledSize.height()) / 2;
-    const int imageX = labelPoint.x() - offsetX;
-    const int imageY = labelPoint.y() - offsetY;
-
-    if (imageX < 0 || imageY < 0 || imageX >= scaledSize.width() || imageY >= scaledSize.height()) {
+    const QRect imageRect = screenshotLabel_->imageRect();
+    if (imageRect.isEmpty()) {
         return false;
     }
 
-    const int remoteWidth = remoteScreenWidth_ > 0 ? remoteScreenWidth_ : imageSize.width();
-    const int remoteHeight = remoteScreenHeight_ > 0 ? remoteScreenHeight_ : imageSize.height();
+    if (!imageRect.contains(labelPoint)) {
+        return false;
+    }
 
-    outRemoteX = imageX * remoteWidth / scaledSize.width();
-    outRemoteY = imageY * remoteHeight / scaledSize.height();
+    const int remoteWidth = remoteScreenWidth_ > 0 ? remoteScreenWidth_ : currentScreenshot_.width();
+    const int remoteHeight = remoteScreenHeight_ > 0 ? remoteScreenHeight_ : currentScreenshot_.height();
+    const int imageX = labelPoint.x() - imageRect.x();
+    const int imageY = labelPoint.y() - imageRect.y();
+
+    outRemoteX = static_cast<int>(
+        (static_cast<int64_t>(imageX) * remoteWidth + imageRect.width() / 2)
+        / imageRect.width()
+    );
+    outRemoteY = static_cast<int>(
+        (static_cast<int64_t>(imageY) * remoteHeight + imageRect.height() / 2)
+        / imageRect.height()
+    );
+    outRemoteX = (std::max)(0, (std::min)(outRemoteX, remoteWidth - 1));
+    outRemoteY = (std::max)(0, (std::min)(outRemoteY, remoteHeight - 1));
     return true;
 }
 
@@ -1260,11 +1374,6 @@ void MainWindow::clickScreenshotAt(const QPoint& labelPoint, int button)
     if (!mapScreenshotPoint(labelPoint, remoteX, remoteY)) {
         return;
     }
-
-    appendLog("Map click: label "
-              + QString::number(labelPoint.x()) + ", " + QString::number(labelPoint.y())
-              + " -> remote " + QString::number(remoteX) + ", " + QString::number(remoteY)
-              + " / " + QString::number(remoteScreenWidth_) + "x" + QString::number(remoteScreenHeight_));
 
     QMetaObject::invokeMethod(worker_, [worker = worker_, remoteX, remoteY, button]() {
         worker->clickMouseAt(remoteX, remoteY, button);
@@ -1286,11 +1395,6 @@ void MainWindow::sendRemoteMouseDown(const QPoint& labelPoint, int button)
     if (!mapScreenshotPoint(labelPoint, remoteX, remoteY)) {
         return;
     }
-
-    appendLog("Map down: label "
-              + QString::number(labelPoint.x()) + ", " + QString::number(labelPoint.y())
-              + " -> remote " + QString::number(remoteX) + ", " + QString::number(remoteY)
-              + " / " + QString::number(remoteScreenWidth_) + "x" + QString::number(remoteScreenHeight_));
 
     lastRemoteMoveX_ = remoteX;
     lastRemoteMoveY_ = remoteY;

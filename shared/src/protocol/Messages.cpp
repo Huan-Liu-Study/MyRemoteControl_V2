@@ -286,7 +286,6 @@ ByteBuffer serializeScreenshotStartRequest(const ScreenshotStartRequest& request
 {
     BinaryWriter writer;
     writer.writeUint32(request.quality);
-    writer.writeUint32(request.scalePercent);
     return writer.buffer();
 }
 
@@ -294,7 +293,7 @@ bool deserializeScreenshotStartRequest(const ByteBuffer& payload, ScreenshotStar
 {
     BinaryReader reader(payload);
 
-    if (!reader.readUint32(outRequest.quality) || !reader.readUint32(outRequest.scalePercent)) {
+    if (!reader.readUint32(outRequest.quality)) {
         return false;
     }
 
@@ -343,7 +342,6 @@ ByteBuffer serializeScreenStreamStartRequest(const ScreenStreamStartRequest& req
 {
     BinaryWriter writer;
     writer.writeUint32(request.quality);
-    writer.writeUint32(request.scalePercent);
     writer.writeUint32(request.intervalMs);
     return writer.buffer();
 }
@@ -353,7 +351,6 @@ bool deserializeScreenStreamStartRequest(const ByteBuffer& payload, ScreenStream
     BinaryReader reader(payload);
 
     if (!reader.readUint32(outRequest.quality)
-        || !reader.readUint32(outRequest.scalePercent)
         || !reader.readUint32(outRequest.intervalMs)) {
         return false;
     }
@@ -379,6 +376,8 @@ ByteBuffer serializeScreenStreamFrameHeader(const ScreenStreamFrameHeader& heade
     writer.writeUint32(static_cast<uint32_t>(header.rects.size()));
     writer.writeUint64(header.estimatedFullImageSize);
     writer.writeUint32(header.captureMs);
+    writer.writeUint32(header.bltMs);
+    writer.writeUint32(header.copyMs);
     writer.writeUint32(header.compareMs);
     writer.writeUint32(header.encodeMs);
     writer.writeUint32(header.sendMs);
@@ -413,6 +412,8 @@ bool deserializeScreenStreamFrameHeader(const ByteBuffer& payload, ScreenStreamF
         || !reader.readUint32(outHeader.rectCount)
         || !reader.readUint64(outHeader.estimatedFullImageSize)
         || !reader.readUint32(outHeader.captureMs)
+        || !reader.readUint32(outHeader.bltMs)
+        || !reader.readUint32(outHeader.copyMs)
         || !reader.readUint32(outHeader.compareMs)
         || !reader.readUint32(outHeader.encodeMs)
         || !reader.readUint32(outHeader.sendMs)

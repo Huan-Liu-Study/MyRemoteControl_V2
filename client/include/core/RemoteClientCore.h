@@ -27,9 +27,9 @@ public:
 
     bool requestDownload(const std::string& remotePath, DownloadStartResponse& outResponse, std::string& errorMessage);
     bool receiveDownloadChunks(const DownloadChunkHandler& onChunk, std::string& errorMessage);
-    bool requestScreenshot(ScreenshotStartResponse& outResponse, std::string& errorMessage, uint32_t quality = 70, uint32_t scalePercent = 100);
+    bool requestScreenshot(ScreenshotStartResponse& outResponse, std::string& errorMessage, uint32_t quality = 70);
     bool receiveScreenshotChunks(const DownloadChunkHandler& onChunk, std::string& errorMessage);
-    bool startScreenStream(uint32_t quality, uint32_t scalePercent, uint32_t intervalMs, std::string& errorMessage);
+    bool startScreenStream(uint32_t quality, uint32_t intervalMs, std::string& errorMessage);
     bool stopScreenStream(std::string& errorMessage);
     bool requestScreenStreamKeyFrame(std::string& errorMessage);
     bool receiveNextScreenStreamFrame(ScreenStreamFrameHeader& outHeader, ByteBuffer& outImage, std::string& errorMessage);

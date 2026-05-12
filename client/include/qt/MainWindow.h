@@ -5,20 +5,39 @@
 #include <QMainWindow>
 #include <QPoint>
 #include <QPixmap>
+#include <QRect>
 #include <QString>
 #include <QVector>
+#include <QWidget>
 
-class QLabel;
 class QLineEdit;
+class QLabel;
 class QListWidget;
 class QPlainTextEdit;
 class QPushButton;
 class QResizeEvent;
 class QSpinBox;
+class QSplitter;
 class QThread;
 class QTimer;
 class RemoteClientWorker;
 class ScreenClientWorker;
+
+class RemoteScreenView : public QWidget {
+public:
+    explicit RemoteScreenView(QWidget* parent = nullptr);
+
+    void setImage(const QPixmap& image, Qt::TransformationMode mode);
+    QRect imageRect() const;
+
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+    void paintEvent(QPaintEvent* event) override;
+
+private:
+    QPixmap image_;
+    Qt::TransformationMode transformMode_ = Qt::SmoothTransformation;
+};
 
 class MainWindow : public QMainWindow {
 public:
@@ -69,6 +88,8 @@ private:
         const QVector<qint64>& rectImageSizes,
         qint64 estimatedFullImageSize,
         int captureMs,
+        int bltMs,
+        int copyMs,
         int compareMs,
         int encodeMs,
         int previousSendMs,
@@ -88,7 +109,6 @@ private:
     QLineEdit* hostInput_ = nullptr;
     QSpinBox* portInput_ = nullptr;
     QSpinBox* qualityInput_ = nullptr;
-    QSpinBox* scaleInput_ = nullptr;
     QSpinBox* refreshIntervalInput_ = nullptr;
     QLineEdit* pathInput_ = nullptr;
     QLabel* statusLabel_ = nullptr;
@@ -96,7 +116,8 @@ private:
     QLabel* streamStateLabel_ = nullptr;
     QListWidget* resultList_ = nullptr;
     QPlainTextEdit* logView_ = nullptr;
-    QLabel* screenshotLabel_ = nullptr;
+    RemoteScreenView* screenshotLabel_ = nullptr;
+    QSplitter* mainSplitter_ = nullptr;
     QPushButton* connectButton_ = nullptr;
     QPushButton* disconnectButton_ = nullptr;
     QPushButton* listDrivesButton_ = nullptr;
@@ -133,6 +154,8 @@ private:
     int lastStreamRectHeight_ = 0;
     int lastStreamRectCount_ = 0;
     int lastCaptureMs_ = 0;
+    int lastBltMs_ = 0;
+    int lastCopyMs_ = 0;
     int lastCompareMs_ = 0;
     int lastEncodeMs_ = 0;
     int lastPreviousSendMs_ = 0;

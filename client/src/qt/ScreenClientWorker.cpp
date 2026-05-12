@@ -56,7 +56,7 @@ void ScreenClientWorker::disconnectFromServer()
     }
 }
 
-void ScreenClientWorker::takeScreenshot(int quality, int scalePercent)
+void ScreenClientWorker::takeScreenshot(int quality)
 {
     if (!isConnected()) {
         emit logMessage("Screen channel is not connected");
@@ -69,8 +69,7 @@ void ScreenClientWorker::takeScreenshot(int quality, int scalePercent)
     if (!client_.requestScreenshot(
             response,
             errorMessage,
-            static_cast<uint32_t>(quality),
-            static_cast<uint32_t>(scalePercent)
+            static_cast<uint32_t>(quality)
         )) {
         emit logMessage(toQString(errorMessage));
         client_.disconnect();
@@ -117,7 +116,7 @@ void ScreenClientWorker::takeScreenshot(int quality, int scalePercent)
     emit requestFinished();
 }
 
-void ScreenClientWorker::startScreenStream(int quality, int scalePercent, int intervalMs)
+void ScreenClientWorker::startScreenStream(int quality, int intervalMs)
 {
     if (!isConnected()) {
         emit logMessage("Screen channel is not connected");
@@ -134,7 +133,6 @@ void ScreenClientWorker::startScreenStream(int quality, int scalePercent, int in
     std::string errorMessage;
     if (!client_.startScreenStream(
             static_cast<uint32_t>(quality),
-            static_cast<uint32_t>(scalePercent),
             static_cast<uint32_t>(intervalMs),
             errorMessage
         )) {
@@ -205,6 +203,8 @@ void ScreenClientWorker::startScreenStream(int quality, int scalePercent, int in
             rectImageSizes,
             static_cast<qint64>(header.estimatedFullImageSize),
             static_cast<int>(header.captureMs),
+            static_cast<int>(header.bltMs),
+            static_cast<int>(header.copyMs),
             static_cast<int>(header.compareMs),
             static_cast<int>(header.encodeMs),
             static_cast<int>(header.sendMs),
