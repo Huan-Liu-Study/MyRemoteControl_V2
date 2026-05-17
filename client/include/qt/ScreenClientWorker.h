@@ -55,6 +55,7 @@ signals:
         int compareMs,
         int encodeMs,
         int previousSendMs,
+        int previousAckWaitMs,
         int fallbackToKeyFrame
     );
     void requestFinished();

@@ -24,6 +24,7 @@ set(SHARED_SOURCES
 add_executable(RemoteServer
     server/src/main.cpp
     server/src/ServerSession.cpp
+    server/src/net/IocpServer.cpp
     server/src/handlers/CommandDispatcher.cpp
     server/src/handlers/DriveHandler.cpp
     server/src/handlers/FileHandler.cpp

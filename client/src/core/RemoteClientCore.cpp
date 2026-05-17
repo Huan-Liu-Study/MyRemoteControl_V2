@@ -34,7 +34,12 @@ RemoteClientCore::~RemoteClientCore()
     disconnect();
 }
 
-bool RemoteClientCore::connectToServer(const std::string& host, uint16_t port, std::string& errorMessage)
+bool RemoteClientCore::connectToServer(
+    const std::string& host,
+    uint16_t port,
+    std::string& errorMessage,
+    uint32_t channel
+)
 {
     disconnect();
 
@@ -75,6 +80,35 @@ bool RemoteClientCore::connectToServer(const std::string& host, uint16_t port, s
     }
 
     socket_ = static_cast<uintptr_t>(clientSock);
+
+    SessionHelloRequest hello{};
+    hello.protocolVersion = PROTOCOL_VERSION;
+    hello.channel = channel;
+    if (!sendPacket(clientSock, CMD::CMD_SESSION_HELLO, serializeSessionHelloRequest(hello))) {
+        errorMessage = "Failed to send session hello";
+        disconnect();
+        return false;
+    }
+
+    ParsedPacket helloPacket{};
+    if (!receiveExpected(CMD::CMD_SESSION_HELLO, helloPacket, errorMessage)) {
+        disconnect();
+        return false;
+    }
+
+    SessionHelloResponse helloResponse{};
+    if (!deserializeSessionHelloResponse(helloPacket.payload, helloResponse)) {
+        errorMessage = "Failed to parse session hello response";
+        disconnect();
+        return false;
+    }
+
+    if (!helloResponse.ok) {
+        errorMessage = "Session hello rejected: " + helloResponse.errorMessage;
+        disconnect();
+        return false;
+    }
+
     errorMessage.clear();
     return true;
 }
@@ -95,6 +129,22 @@ void RemoteClientCore::disconnect()
 bool RemoteClientCore::isConnected() const
 {
     return socket_ != 0;
+}
+
+bool RemoteClientCore::sendHeartbeat(std::string& errorMessage)
+{
+    if (!isConnected()) {
+        errorMessage = "Not connected";
+        return false;
+    }
+
+    if (!sendPacket(toSocket(socket_), CMD::CMD_SESSION_HEARTBEAT)) {
+        errorMessage = "Failed to send heartbeat";
+        return false;
+    }
+
+    ParsedPacket response{};
+    return receiveExpected(CMD::CMD_SESSION_HEARTBEAT, response, errorMessage);
 }
 
 bool RemoteClientCore::listDrives(std::vector<std::string>& outDrives, std::string& errorMessage)
@@ -397,6 +447,26 @@ bool RemoteClientCore::receiveNextScreenStreamFrame(ScreenStreamFrameHeader& out
         errorMessage = "Unexpected screen stream frame packet: " + std::to_string(chunkPacket.header.command);
         return false;
     }
+}
+
+bool RemoteClientCore::acknowledgeScreenStreamFrame(uint64_t frameId, bool ok, std::string& errorMessage)
+{
+    if (!isConnected()) {
+        errorMessage = "Not connected";
+        return false;
+    }
+
+    ScreenStreamFrameAck ack{};
+    ack.frameId = frameId;
+    ack.ok = ok ? 1u : 0u;
+
+    if (!sendPacket(toSocket(socket_), CMD::CMD_SCREEN_STREAM_FRAME_ACK, serializeScreenStreamFrameAck(ack))) {
+        errorMessage = "Failed to send screen stream frame ack";
+        return false;
+    }
+
+    errorMessage.clear();
+    return true;
 }
 
 bool RemoteClientCore::moveMouse(int32_t x, int32_t y, std::string& errorMessage)

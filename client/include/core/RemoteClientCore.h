@@ -18,9 +18,15 @@ public:
     RemoteClientCore(const RemoteClientCore&) = delete;
     RemoteClientCore& operator=(const RemoteClientCore&) = delete;
 
-    bool connectToServer(const std::string& host, uint16_t port, std::string& errorMessage);
+    bool connectToServer(
+        const std::string& host,
+        uint16_t port,
+        std::string& errorMessage,
+        uint32_t channel = SESSION_CHANNEL_CONTROL
+    );
     void disconnect();
     bool isConnected() const;
+    bool sendHeartbeat(std::string& errorMessage);
 
     bool listDrives(std::vector<std::string>& outDrives, std::string& errorMessage);
     bool listDirectory(const std::string& path, std::vector<FileEntry>& outEntries, std::string& errorMessage);
@@ -33,6 +39,7 @@ public:
     bool stopScreenStream(std::string& errorMessage);
     bool requestScreenStreamKeyFrame(std::string& errorMessage);
     bool receiveNextScreenStreamFrame(ScreenStreamFrameHeader& outHeader, ByteBuffer& outImage, std::string& errorMessage);
+    bool acknowledgeScreenStreamFrame(uint64_t frameId, bool ok, std::string& errorMessage);
     bool moveMouse(int32_t x, int32_t y, std::string& errorMessage);
     bool sendMouseButton(uint32_t button, uint32_t action, std::string& errorMessage);
     bool clickMouse(uint32_t button, std::string& errorMessage);

@@ -282,6 +282,49 @@ bool deserializeMouseWheelRequest(const ByteBuffer& payload, MouseWheelRequest& 
     return true;
 }
 
+ByteBuffer serializeSessionHelloRequest(const SessionHelloRequest& request)
+{
+    BinaryWriter writer;
+    writer.writeUint32(request.protocolVersion);
+    writer.writeUint32(request.channel);
+    return writer.buffer();
+}
+
+bool deserializeSessionHelloRequest(const ByteBuffer& payload, SessionHelloRequest& outRequest)
+{
+    BinaryReader reader(payload);
+
+    if (!reader.readUint32(outRequest.protocolVersion) || !reader.readUint32(outRequest.channel)) {
+        return false;
+    }
+
+    return reader.isFinished();
+}
+
+ByteBuffer serializeSessionHelloResponse(const SessionHelloResponse& response)
+{
+    BinaryWriter writer;
+    writer.writeUint32(response.ok);
+    writer.writeUint32(response.protocolVersion);
+    writer.writeString(response.errorMessage);
+    return writer.buffer();
+}
+
+bool deserializeSessionHelloResponse(const ByteBuffer& payload, SessionHelloResponse& outResponse)
+{
+    BinaryReader reader(payload);
+
+    if (!reader.readUint32(outResponse.ok) || !reader.readUint32(outResponse.protocolVersion)) {
+        return false;
+    }
+
+    if (!reader.readString(outResponse.errorMessage)) {
+        return false;
+    }
+
+    return reader.isFinished();
+}
+
 ByteBuffer serializeScreenshotStartRequest(const ScreenshotStartRequest& request)
 {
     BinaryWriter writer;
@@ -381,6 +424,7 @@ ByteBuffer serializeScreenStreamFrameHeader(const ScreenStreamFrameHeader& heade
     writer.writeUint32(header.compareMs);
     writer.writeUint32(header.encodeMs);
     writer.writeUint32(header.sendMs);
+    writer.writeUint32(header.ackWaitMs);
     writer.writeUint32(header.fallbackToKeyFrame);
     for (const ScreenStreamRect& rect : header.rects) {
         writer.writeUint32(rect.x);
@@ -417,6 +461,7 @@ bool deserializeScreenStreamFrameHeader(const ByteBuffer& payload, ScreenStreamF
         || !reader.readUint32(outHeader.compareMs)
         || !reader.readUint32(outHeader.encodeMs)
         || !reader.readUint32(outHeader.sendMs)
+        || !reader.readUint32(outHeader.ackWaitMs)
         || !reader.readUint32(outHeader.fallbackToKeyFrame)) {
         return false;
     }
@@ -440,5 +485,24 @@ bool deserializeScreenStreamFrameHeader(const ByteBuffer& payload, ScreenStreamF
     }
 
     outHeader.rects = std::move(rects);
+    return reader.isFinished();
+}
+
+ByteBuffer serializeScreenStreamFrameAck(const ScreenStreamFrameAck& ack)
+{
+    BinaryWriter writer;
+    writer.writeUint64(ack.frameId);
+    writer.writeUint32(ack.ok);
+    return writer.buffer();
+}
+
+bool deserializeScreenStreamFrameAck(const ByteBuffer& payload, ScreenStreamFrameAck& outAck)
+{
+    BinaryReader reader(payload);
+
+    if (!reader.readUint64(outAck.frameId) || !reader.readUint32(outAck.ok)) {
+        return false;
+    }
+
     return reader.isFinished();
 }

@@ -1,7 +1,6 @@
 #pragma once
 
-#include <winsock2.h>
-
+#include "ServerSessionContext.h"
 #include "protocol/PacketCodec.h"
 
-bool dispatchCommand(SOCKET clientSock, const ParsedPacket& request);
+bool dispatchCommand(ServerSessionContext& session, const ParsedPacket& request);

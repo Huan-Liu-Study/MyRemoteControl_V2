@@ -33,7 +33,12 @@ void ScreenClientWorker::connectToServer(QString host, int port)
     emit logMessage("Connecting screen channel");
 
     std::string errorMessage;
-    if (!client_.connectToServer(toStdString(host), static_cast<uint16_t>(port), errorMessage)) {
+    if (!client_.connectToServer(
+            toStdString(host),
+            static_cast<uint16_t>(port),
+            errorMessage,
+            SESSION_CHANNEL_SCREEN
+        )) {
         emit logMessage(toQString(errorMessage));
         emit requestFinished();
         return;
@@ -208,8 +213,18 @@ void ScreenClientWorker::startScreenStream(int quality, int intervalMs)
             static_cast<int>(header.compareMs),
             static_cast<int>(header.encodeMs),
             static_cast<int>(header.sendMs),
+            static_cast<int>(header.ackWaitMs),
             static_cast<int>(header.fallbackToKeyFrame)
         );
+
+        if (!client_.acknowledgeScreenStreamFrame(header.frameId, true, errorMessage)) {
+            emit logMessage(toQString(errorMessage));
+            client_.disconnect();
+            emit disconnected("Screen channel disconnected: " + toQString(errorMessage));
+            streaming_ = false;
+            emit requestFinished();
+            return;
+        }
     }
 
     streaming_ = false;

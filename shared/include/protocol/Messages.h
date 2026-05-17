@@ -8,6 +8,10 @@
 
 // Protocol strings are encoded as UTF-8 byte strings.
 
+constexpr uint32_t PROTOCOL_VERSION = 1;
+constexpr uint32_t SESSION_CHANNEL_CONTROL = 1;
+constexpr uint32_t SESSION_CHANNEL_SCREEN = 2;
+
 struct DriveListResponse {
     std::vector<std::string> drives;
 };
@@ -60,6 +64,17 @@ struct MouseWheelRequest {
     int32_t delta;
 };
 
+struct SessionHelloRequest {
+    uint32_t protocolVersion;
+    uint32_t channel;
+};
+
+struct SessionHelloResponse {
+    uint32_t ok;
+    uint32_t protocolVersion;
+    std::string errorMessage;
+};
+
 struct ScreenshotStartRequest {
     uint32_t quality;
 };
@@ -108,9 +123,15 @@ struct ScreenStreamFrameHeader {
     uint32_t compareMs;
     uint32_t encodeMs;
     uint32_t sendMs;
+    uint32_t ackWaitMs;
     uint32_t fallbackToKeyFrame;
     std::vector<ScreenStreamRect> rects;
     std::string imageFormat;
+};
+
+struct ScreenStreamFrameAck {
+    uint64_t frameId;
+    uint32_t ok;
 };
 
 ByteBuffer serializeDriveListResponse(const DriveListResponse& response);
@@ -143,6 +164,12 @@ bool deserializeKeyboardEventRequest(const ByteBuffer& payload, KeyboardEventReq
 ByteBuffer serializeMouseWheelRequest(const MouseWheelRequest& request);
 bool deserializeMouseWheelRequest(const ByteBuffer& payload, MouseWheelRequest& outRequest);
 
+ByteBuffer serializeSessionHelloRequest(const SessionHelloRequest& request);
+bool deserializeSessionHelloRequest(const ByteBuffer& payload, SessionHelloRequest& outRequest);
+
+ByteBuffer serializeSessionHelloResponse(const SessionHelloResponse& response);
+bool deserializeSessionHelloResponse(const ByteBuffer& payload, SessionHelloResponse& outResponse);
+
 ByteBuffer serializeScreenshotStartRequest(const ScreenshotStartRequest& request);
 bool deserializeScreenshotStartRequest(const ByteBuffer& payload, ScreenshotStartRequest& outRequest);
 
@@ -154,3 +181,6 @@ bool deserializeScreenStreamStartRequest(const ByteBuffer& payload, ScreenStream
 
 ByteBuffer serializeScreenStreamFrameHeader(const ScreenStreamFrameHeader& header);
 bool deserializeScreenStreamFrameHeader(const ByteBuffer& payload, ScreenStreamFrameHeader& outHeader);
+
+ByteBuffer serializeScreenStreamFrameAck(const ScreenStreamFrameAck& ack);
+bool deserializeScreenStreamFrameAck(const ByteBuffer& payload, ScreenStreamFrameAck& outAck);

@@ -170,6 +170,29 @@ void testMouseWheelRequestRoundTrip() {
     expectTrue(decoded.delta == -120, "mouse wheel delta mismatch");
 }
 
+void testSessionHelloRequestRoundTrip() {
+    SessionHelloRequest request{PROTOCOL_VERSION, SESSION_CHANNEL_SCREEN};
+
+    ByteBuffer payload = serializeSessionHelloRequest(request);
+
+    SessionHelloRequest decoded{};
+    expectTrue(deserializeSessionHelloRequest(payload, decoded), "session hello request deserialize should succeed");
+    expectTrue(decoded.protocolVersion == PROTOCOL_VERSION, "session hello protocol version mismatch");
+    expectTrue(decoded.channel == SESSION_CHANNEL_SCREEN, "session hello channel mismatch");
+}
+
+void testSessionHelloResponseRoundTrip() {
+    SessionHelloResponse response{1u, PROTOCOL_VERSION, ""};
+
+    ByteBuffer payload = serializeSessionHelloResponse(response);
+
+    SessionHelloResponse decoded{};
+    expectTrue(deserializeSessionHelloResponse(payload, decoded), "session hello response deserialize should succeed");
+    expectTrue(decoded.ok == 1u, "session hello response ok mismatch");
+    expectTrue(decoded.protocolVersion == PROTOCOL_VERSION, "session hello response version mismatch");
+    expectTrue(decoded.errorMessage.empty(), "session hello response error should be empty");
+}
+
 void testScreenshotStartRequestRoundTrip() {
     ScreenshotStartRequest request{85u};
 
@@ -213,6 +236,7 @@ void testScreenStreamFrameHeaderRoundTrip() {
         3u,
         12u,
         2u,
+        4u,
         0u,
         {
             {10u, 20u, 64u, 64u, 1200u},
@@ -245,6 +269,7 @@ void testScreenStreamFrameHeaderRoundTrip() {
     expectTrue(decoded.compareMs == 3u, "screen stream compare ms mismatch");
     expectTrue(decoded.encodeMs == 12u, "screen stream encode ms mismatch");
     expectTrue(decoded.sendMs == 2u, "screen stream send ms mismatch");
+    expectTrue(decoded.ackWaitMs == 4u, "screen stream ack ms mismatch");
     expectTrue(decoded.fallbackToKeyFrame == 0u, "screen stream fallback mismatch");
     expectTrue(decoded.rects.size() == 2u, "screen stream rect vector size mismatch");
     expectTrue(decoded.rects[0].x == 10u, "screen stream first rect x mismatch");
@@ -252,6 +277,17 @@ void testScreenStreamFrameHeaderRoundTrip() {
     expectTrue(decoded.rects[1].x == 90u, "screen stream second rect x mismatch");
     expectTrue(decoded.rects[1].imageSize == 800u, "screen stream second rect size mismatch");
     expectTrue(decoded.imageFormat == "JPG", "screen stream image format mismatch");
+}
+
+void testScreenStreamFrameAckRoundTrip() {
+    ScreenStreamFrameAck ack{123u, 1u};
+
+    ByteBuffer payload = serializeScreenStreamFrameAck(ack);
+
+    ScreenStreamFrameAck decoded{};
+    expectTrue(deserializeScreenStreamFrameAck(payload, decoded), "screen stream frame ack deserialize should succeed");
+    expectTrue(decoded.frameId == 123u, "screen stream frame ack id mismatch");
+    expectTrue(decoded.ok == 1u, "screen stream frame ack ok mismatch");
 }
 
 } // namespace
@@ -272,9 +308,12 @@ int main() {
         testScreenshotStartResponseRoundTrip();
         testKeyboardEventRequestRoundTrip();
         testMouseWheelRequestRoundTrip();
+        testSessionHelloRequestRoundTrip();
+        testSessionHelloResponseRoundTrip();
         testScreenshotStartRequestRoundTrip();
         testScreenStreamStartRequestRoundTrip();
         testScreenStreamFrameHeaderRoundTrip();
+        testScreenStreamFrameAckRoundTrip();
 
         std::cout << "All message serialization tests passed." << std::endl;
         return 0;

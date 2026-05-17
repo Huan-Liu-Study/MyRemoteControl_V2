@@ -59,6 +59,8 @@ private:
     void downloadFile();
     void requestScreenFrame();
     void toggleScreenStream();
+    void scheduleControlReconnect();
+    void reconnectControlChannel();
     void scheduleScreenReconnect();
     void reconnectScreenChannel();
     void scheduleInputRefresh();
@@ -93,6 +95,7 @@ private:
         int compareMs,
         int encodeMs,
         int previousSendMs,
+        int previousAckWaitMs,
         int fallbackToKeyFrame
     );
     void updateScreenshotView();
@@ -129,7 +132,9 @@ private:
     QThread* networkThread_ = nullptr;
     QThread* screenThread_ = nullptr;
     QTimer* inputRefreshTimer_ = nullptr;
+    QTimer* controlReconnectTimer_ = nullptr;
     QTimer* screenReconnectTimer_ = nullptr;
+    QTimer* heartbeatTimer_ = nullptr;
     RemoteClientWorker* worker_ = nullptr;
     ScreenClientWorker* screenWorker_ = nullptr;
     QPixmap currentScreenshot_;
@@ -159,7 +164,9 @@ private:
     int lastCompareMs_ = 0;
     int lastEncodeMs_ = 0;
     int lastPreviousSendMs_ = 0;
+    int lastPreviousAckWaitMs_ = 0;
     int lastFallbackToKeyFrame_ = 0;
+    int controlReconnectAttempts_ = 0;
     int screenReconnectAttempts_ = 0;
     int screenshotPressButton_ = 0;
     int lastRemoteMoveX_ = -1;
@@ -172,6 +179,7 @@ private:
     bool screenStreamActive_ = false;
     bool reconnectScreenAfterStreamStop_ = false;
     bool restartScreenStreamAfterReconnect_ = false;
+    bool controlReconnectPending_ = false;
     bool disconnectRequested_ = false;
     bool screenReconnectPending_ = false;
     bool keyFrameRequestPending_ = false;

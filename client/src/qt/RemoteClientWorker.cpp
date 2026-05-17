@@ -327,6 +327,20 @@ void RemoteClientWorker::keyUp(int virtualKey)
     }
 }
 
+void RemoteClientWorker::sendHeartbeat()
+{
+    if (!isConnected()) {
+        return;
+    }
+
+    std::string errorMessage;
+    if (!client_.sendHeartbeat(errorMessage)) {
+        emit logMessage("Heartbeat failed: " + toQString(errorMessage));
+        client_.disconnect();
+        emit disconnected("Heartbeat failed: " + toQString(errorMessage));
+    }
+}
+
 bool RemoteClientWorker::isConnected() const
 {
     return client_.isConnected();

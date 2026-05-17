@@ -322,11 +322,28 @@ void MainWindow::buildUi()
         requestScreenFrame();
     });
 
+    controlReconnectTimer_ = new QTimer(this);
+    controlReconnectTimer_->setSingleShot(true);
+    controlReconnectTimer_->setInterval(1500);
+    connect(controlReconnectTimer_, &QTimer::timeout, this, [this]() {
+        reconnectControlChannel();
+    });
+
     screenReconnectTimer_ = new QTimer(this);
     screenReconnectTimer_->setSingleShot(true);
     screenReconnectTimer_->setInterval(1000);
     connect(screenReconnectTimer_, &QTimer::timeout, this, [this]() {
         reconnectScreenChannel();
+    });
+
+    heartbeatTimer_ = new QTimer(this);
+    heartbeatTimer_->setInterval(5000);
+    connect(heartbeatTimer_, &QTimer::timeout, this, [this]() {
+        if (!worker_ || !controlConnected_ || disconnectRequested_) {
+            return;
+        }
+
+        QMetaObject::invokeMethod(worker_, "sendHeartbeat", Qt::QueuedConnection);
     });
 }
 
@@ -455,16 +472,46 @@ void MainWindow::startNetworkThread()
 
     connect(worker_, &RemoteClientWorker::connected, this, [this]() {
         controlConnected_ = true;
+        controlReconnectPending_ = false;
+        controlReconnectAttempts_ = 0;
+        if (heartbeatTimer_) {
+            heartbeatTimer_->start();
+        }
+        if (!screenConnected_ && !screenReconnectPending_ && !disconnectRequested_) {
+            scheduleScreenReconnect();
+        }
         if (screenConnected_) {
             setBusy(false);
             setConnected(true);
         }
     });
     connect(worker_, &RemoteClientWorker::disconnected, this, [this](const QString& reason) {
+        const bool shouldReconnect = connected_ && !disconnectRequested_;
+        const bool shouldRestartStream = screenStreamActive_ && shouldReconnect;
         controlConnected_ = false;
+        screenConnected_ = false;
+        screenBusy_ = false;
+        screenStreamActive_ = false;
+        restartScreenStreamAfterReconnect_ = shouldRestartStream;
+        pendingScreenFrame_ = false;
+        if (heartbeatTimer_) {
+            heartbeatTimer_->stop();
+        }
+        if (screenReconnectTimer_) {
+            screenReconnectTimer_->stop();
+        }
+        if (screenWorker_) {
+            QMetaObject::invokeMethod(screenWorker_, "disconnectFromServer", Qt::QueuedConnection);
+        }
         setBusy(false);
-        setConnected(false);
         appendLog(reason);
+        if (shouldReconnect) {
+            scheduleControlReconnect();
+            updateScreenStreamStatus();
+            return;
+        }
+
+        setConnected(false);
     });
     connect(worker_, &RemoteClientWorker::logMessage, this, [this](const QString& message) {
         appendLog(message);
@@ -553,7 +600,7 @@ void MainWindow::startNetworkThread()
 
         reconnectScreenAfterStreamStop_ = false;
         restartScreenStreamAfterReconnect_ = false;
-        if (!controlConnected_) {
+        if (!controlConnected_ && !controlReconnectPending_) {
             setConnected(false);
         } else {
             setConnected(true);
@@ -597,6 +644,7 @@ void MainWindow::startNetworkThread()
         int compareMs,
         int encodeMs,
         int previousSendMs,
+        int previousAckWaitMs,
         int fallbackToKeyFrame
     ) {
         showScreenStreamFrame(
@@ -625,6 +673,7 @@ void MainWindow::startNetworkThread()
             compareMs,
             encodeMs,
             previousSendMs,
+            previousAckWaitMs,
             fallbackToKeyFrame
         );
     });
@@ -663,6 +712,12 @@ void MainWindow::stopNetworkThread()
     disconnectRequested_ = true;
     if (screenReconnectTimer_) {
         screenReconnectTimer_->stop();
+    }
+    if (controlReconnectTimer_) {
+        controlReconnectTimer_->stop();
+    }
+    if (heartbeatTimer_) {
+        heartbeatTimer_->stop();
     }
 
     if (screenWorker_ && screenStreamActive_) {
@@ -708,6 +763,8 @@ void MainWindow::connectToServer()
     disconnectRequested_ = false;
     screenReconnectPending_ = false;
     screenReconnectAttempts_ = 0;
+    controlReconnectPending_ = false;
+    controlReconnectAttempts_ = 0;
     screenFailureCount_ = 0;
     lastFrameBytes_ = 0;
     lastFrameElapsedMs_ = 0;
@@ -727,6 +784,7 @@ void MainWindow::connectToServer()
     lastCompareMs_ = 0;
     lastEncodeMs_ = 0;
     lastPreviousSendMs_ = 0;
+    lastPreviousAckWaitMs_ = 0;
     lastFallbackToKeyFrame_ = 0;
     keyFrameRequestPending_ = false;
     updateScreenStreamStatus();
@@ -751,9 +809,16 @@ void MainWindow::disconnectFromServer()
     setBusy(true);
     disconnectRequested_ = true;
     screenReconnectPending_ = false;
+    controlReconnectPending_ = false;
     restartScreenStreamAfterReconnect_ = false;
     if (screenReconnectTimer_) {
         screenReconnectTimer_->stop();
+    }
+    if (controlReconnectTimer_) {
+        controlReconnectTimer_->stop();
+    }
+    if (heartbeatTimer_) {
+        heartbeatTimer_->stop();
     }
     if (screenWorker_ && screenStreamActive_) {
         screenWorker_->stopScreenStream();
@@ -880,6 +945,40 @@ void MainWindow::toggleScreenStream()
     }, Qt::QueuedConnection);
 }
 
+void MainWindow::scheduleControlReconnect()
+{
+    if (!controlReconnectTimer_ || disconnectRequested_) {
+        return;
+    }
+
+    if (controlReconnectPending_) {
+        return;
+    }
+
+    controlReconnectPending_ = true;
+    ++controlReconnectAttempts_;
+    appendLog("Control channel reconnect scheduled, attempt " + QString::number(controlReconnectAttempts_));
+    controlReconnectTimer_->start();
+    updateScreenStreamStatus();
+}
+
+void MainWindow::reconnectControlChannel()
+{
+    controlReconnectPending_ = false;
+    if (!worker_ || disconnectRequested_) {
+        updateScreenStreamStatus();
+        return;
+    }
+
+    const QString host = hostInput_->text();
+    const int port = portInput_->value();
+    appendLog("Reconnecting control channel");
+    QMetaObject::invokeMethod(worker_, [worker = worker_, host, port]() {
+        worker->connectToServer(host, port);
+    }, Qt::QueuedConnection);
+    updateScreenStreamStatus();
+}
+
 void MainWindow::scheduleScreenReconnect()
 {
     if (!screenReconnectTimer_ || !controlConnected_ || disconnectRequested_) {
@@ -933,6 +1032,7 @@ void MainWindow::setConnected(bool connected)
         screenStreamActive_ = false;
         reconnectScreenAfterStreamStop_ = false;
         restartScreenStreamAfterReconnect_ = false;
+        controlReconnectPending_ = false;
         screenReconnectPending_ = false;
         lastFrameBytes_ = 0;
         lastFrameElapsedMs_ = 0;
@@ -952,6 +1052,7 @@ void MainWindow::setConnected(bool connected)
         lastCompareMs_ = 0;
         lastEncodeMs_ = 0;
         lastPreviousSendMs_ = 0;
+        lastPreviousAckWaitMs_ = 0;
         lastFallbackToKeyFrame_ = 0;
         remoteScreenWidth_ = 0;
         remoteScreenHeight_ = 0;
@@ -964,6 +1065,12 @@ void MainWindow::setConnected(bool connected)
         }
         if (screenReconnectTimer_) {
             screenReconnectTimer_->stop();
+        }
+        if (controlReconnectTimer_) {
+            controlReconnectTimer_->stop();
+        }
+        if (heartbeatTimer_) {
+            heartbeatTimer_->stop();
         }
     }
 
@@ -1071,10 +1178,11 @@ void MainWindow::showScreenStreamFrame(
     int captureMs,
     int bltMs,
     int copyMs,
-    int compareMs,
-    int encodeMs,
-    int previousSendMs,
-    int fallbackToKeyFrame
+        int compareMs,
+        int encodeMs,
+        int previousSendMs,
+        int previousAckWaitMs,
+        int fallbackToKeyFrame
 )
 {
     if (frameType == SCREEN_STREAM_FRAME_KEY) {
@@ -1164,6 +1272,7 @@ void MainWindow::showScreenStreamFrame(
     lastCompareMs_ = compareMs;
     lastEncodeMs_ = encodeMs;
     lastPreviousSendMs_ = previousSendMs;
+    lastPreviousAckWaitMs_ = previousAckWaitMs;
     lastFallbackToKeyFrame_ = fallbackToKeyFrame;
 
     remoteScreenWidth_ = screenWidth > 0 ? screenWidth : captureWidth;
@@ -1198,6 +1307,8 @@ void MainWindow::updateScreenStreamStatus()
     QString state = "idle";
     if (!connected_) {
         state = "disconnected";
+    } else if (controlReconnectPending_) {
+        state = "reconnecting control";
     } else if (screenStreamActive_) {
         state = "streaming";
     } else if (screenReconnectPending_) {
@@ -1242,7 +1353,8 @@ void MainWindow::updateScreenStreamStatus()
             + "/copy" + QString::number(lastCopyMs_)
             + "/cmp" + QString::number(lastCompareMs_)
             + "/enc" + QString::number(lastEncodeMs_)
-            + "/prevSend" + QString::number(lastPreviousSendMs_);
+            + "/prevSend" + QString::number(lastPreviousSendMs_)
+            + "/prevAck" + QString::number(lastPreviousAckWaitMs_);
         if (lastFallbackToKeyFrame_ != 0) {
             text += ", fallback=KEY";
         }
@@ -1258,6 +1370,10 @@ void MainWindow::updateScreenStreamStatus()
 
     if (screenFailureCount_ > 0) {
         text += ", failures=" + QString::number(screenFailureCount_);
+    }
+
+    if (controlReconnectAttempts_ > 0) {
+        text += ", controlReconnect=" + QString::number(controlReconnectAttempts_);
     }
 
     streamStateLabel_->setText(text);
@@ -1298,7 +1414,8 @@ void MainWindow::updateFrameStats(qint64 bytes, qint64 elapsedMs)
             + "/copy" + QString::number(lastCopyMs_)
             + "/cmp" + QString::number(lastCompareMs_)
             + "/enc" + QString::number(lastEncodeMs_)
-            + "/prevSend" + QString::number(lastPreviousSendMs_);
+            + "/prevSend" + QString::number(lastPreviousSendMs_)
+            + "/prevAck" + QString::number(lastPreviousAckWaitMs_);
         text += ", ";
     }
 

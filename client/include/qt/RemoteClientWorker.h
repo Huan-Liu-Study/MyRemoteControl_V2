@@ -28,6 +28,7 @@ public slots:
     void probeMousePosition(int expectedX, int expectedY);
     void keyDown(int virtualKey);
     void keyUp(int virtualKey);
+    void sendHeartbeat();
 
 signals:
     void connected();

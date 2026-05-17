@@ -3,6 +3,8 @@
 namespace CMD {
     enum Type : unsigned short {
         CMD_TEST_CONNECT = 100,
+        CMD_SESSION_HELLO = 110,
+        CMD_SESSION_HEARTBEAT = 111,
         CMD_LIST_DRIVES  = 101,
         CMD_LIST_DIR     = 102,
 
@@ -25,6 +27,7 @@ namespace CMD {
         CMD_SCREEN_STREAM_FRAME_END = 307,
         CMD_SCREEN_STREAM_STOP = 308,
         CMD_SCREEN_STREAM_KEYFRAME_REQUEST = 309,
+        CMD_SCREEN_STREAM_FRAME_ACK = 310,
         
         CMD_ERROR        = 999
     };

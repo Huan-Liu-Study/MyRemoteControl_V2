@@ -4,7 +4,9 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <future>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -13,6 +15,7 @@
 #include <gdiplus.h>
 #include <objidl.h>
 
+#include "concurrency/ThreadPool.h"
 #include "net/SocketHelpers.h"
 #include "protocol/Command.h"
 #include "protocol/Messages.h"
@@ -27,6 +30,9 @@ constexpr uint32_t DELTA_BLOCK_SIZE = 64;
 constexpr size_t MAX_DELTA_RECTS = 128;
 constexpr size_t MAX_DELTA_ENCODE_RECTS = 16;
 constexpr uint32_t MAX_BOUNDING_RECT_AREA_PERCENT = 70;
+constexpr size_t MIN_BLOCK_ROWS_PER_DIFF_TASK = 4;
+constexpr size_t MIN_RECTS_FOR_PARALLEL_ENCODE = 2;
+constexpr uint32_t FRAME_ACK_TIMEOUT_MS = 5000;
 
 struct CapturedScreenFrame {
     uint32_t screenWidth = 0;
@@ -50,6 +56,12 @@ struct FrameTiming {
     uint32_t compareMs = 0;
     uint32_t encodeMs = 0;
     uint32_t sendMs = 0;
+    uint32_t ackWaitMs = 0;
+};
+
+struct EncodedRectResult {
+    ChangedRect rect;
+    ByteBuffer image;
 };
 
 bool getEncoderClsid(const WCHAR* mimeType, CLSID& outClsid);
@@ -232,7 +244,13 @@ private:
 enum class StreamControlEvent {
     None,
     Stop,
-    KeyFrameRequest
+    KeyFrameRequest,
+    FrameAck
+};
+
+struct StreamControlResult {
+    StreamControlEvent event = StreamControlEvent::None;
+    uint64_t frameId = 0;
 };
 
 bool getEncoderClsid(const WCHAR* mimeType, CLSID& outClsid)
@@ -319,6 +337,22 @@ JpegEncoderContext& jpegEncoderContext()
 {
     static JpegEncoderContext context;
     return context;
+}
+
+size_t screenWorkerCount()
+{
+    const unsigned int hardwareThreads = std::thread::hardware_concurrency();
+    if (hardwareThreads <= 2) {
+        return 2;
+    }
+
+    return (std::min)(static_cast<size_t>(hardwareThreads - 1), static_cast<size_t>(4));
+}
+
+ThreadPool& screenProcessingPool()
+{
+    static ThreadPool pool(screenWorkerCount());
+    return pool;
 }
 
 bool encodePixelsToJpeg(
@@ -558,6 +592,84 @@ std::vector<ChangedRect> findChangedBlocks(const CapturedScreenFrame& previous, 
     return blocks;
 }
 
+std::vector<ChangedRect> findChangedBlocksInRows(
+    const CapturedScreenFrame& previous,
+    const CapturedScreenFrame& current,
+    uint32_t startY,
+    uint32_t endY
+)
+{
+    std::vector<ChangedRect> blocks;
+    for (uint32_t y = startY; y < endY; y += DELTA_BLOCK_SIZE) {
+        for (uint32_t x = 0; x < current.captureWidth; x += DELTA_BLOCK_SIZE) {
+            const uint32_t blockWidth = (std::min)(DELTA_BLOCK_SIZE, current.captureWidth - x);
+            const uint32_t blockHeight = (std::min)(DELTA_BLOCK_SIZE, current.captureHeight - y);
+            bool changed = false;
+
+            for (uint32_t row = 0; row < blockHeight && !changed; ++row) {
+                for (uint32_t col = 0; col < blockWidth; ++col) {
+                    const size_t index = (static_cast<size_t>(y + row) * current.captureWidth + (x + col)) * 4;
+                    if (previous.pixels[index] != current.pixels[index]
+                        || previous.pixels[index + 1] != current.pixels[index + 1]
+                        || previous.pixels[index + 2] != current.pixels[index + 2]) {
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+
+            if (changed) {
+                blocks.push_back({x, y, blockWidth, blockHeight});
+            }
+        }
+    }
+
+    return blocks;
+}
+
+std::vector<ChangedRect> findChangedBlocksParallel(const CapturedScreenFrame& previous, const CapturedScreenFrame& current)
+{
+    if (previous.captureWidth != current.captureWidth
+        || previous.captureHeight != current.captureHeight
+        || previous.pixels.size() != current.pixels.size()) {
+        return {{0, 0, current.captureWidth, current.captureHeight}};
+    }
+
+    const size_t blockRows = (current.captureHeight + DELTA_BLOCK_SIZE - 1) / DELTA_BLOCK_SIZE;
+    const size_t workerCount = screenWorkerCount();
+    if (blockRows < MIN_BLOCK_ROWS_PER_DIFF_TASK || workerCount <= 1) {
+        return findChangedBlocks(previous, current);
+    }
+
+    const size_t taskCount = (std::min)(workerCount, blockRows);
+    const size_t rowsPerTask = (blockRows + taskCount - 1) / taskCount;
+
+    std::vector<std::future<std::vector<ChangedRect>>> futures;
+    futures.reserve(taskCount);
+    for (size_t taskIndex = 0; taskIndex < taskCount; ++taskIndex) {
+        const uint32_t startY = static_cast<uint32_t>(taskIndex * rowsPerTask * DELTA_BLOCK_SIZE);
+        if (startY >= current.captureHeight) {
+            break;
+        }
+
+        const uint32_t endY = (std::min)(
+            current.captureHeight,
+            static_cast<uint32_t>((taskIndex + 1) * rowsPerTask * DELTA_BLOCK_SIZE)
+        );
+        futures.push_back(screenProcessingPool().enqueue([&previous, &current, startY, endY]() {
+            return findChangedBlocksInRows(previous, current, startY, endY);
+        }));
+    }
+
+    std::vector<ChangedRect> blocks;
+    for (auto& future : futures) {
+        std::vector<ChangedRect> partial = future.get();
+        blocks.insert(blocks.end(), partial.begin(), partial.end());
+    }
+
+    return blocks;
+}
+
 std::vector<ChangedRect> mergeChangedBlocks(const std::vector<ChangedRect>& blocks)
 {
     if (blocks.empty()) {
@@ -678,6 +790,102 @@ ByteBuffer copyRectPixels(const CapturedScreenFrame& frame, const ChangedRect& r
     return rectPixels;
 }
 
+EncodedRectResult encodeChangedRect(
+    const CapturedScreenFrame& frame,
+    const ChangedRect& changedRect,
+    uint32_t quality,
+    std::string& imageFormat,
+    std::string& errorMessage
+)
+{
+    EncodedRectResult result{};
+    result.rect = changedRect;
+
+    const ByteBuffer rectPixels = copyRectPixels(frame, changedRect);
+    if (!encodePixelsToScreenImage(
+            rectPixels,
+            changedRect.width,
+            changedRect.height,
+            quality,
+            result.image,
+            imageFormat,
+            errorMessage
+        )) {
+        return {};
+    }
+
+    return result;
+}
+
+bool encodeChangedRectsParallel(
+    const CapturedScreenFrame& frame,
+    const std::vector<ChangedRect>& changedRects,
+    uint32_t quality,
+    std::vector<EncodedRectResult>& outResults,
+    std::string& outImageFormat,
+    std::string& errorMessage
+)
+{
+    outResults.clear();
+    outImageFormat.clear();
+
+    std::vector<ChangedRect> rectsToEncode;
+    rectsToEncode.reserve(changedRects.size());
+    for (const ChangedRect& changedRect : changedRects) {
+        if (changedRect.width > 0 && changedRect.height > 0) {
+            rectsToEncode.push_back(changedRect);
+        }
+    }
+
+    if (rectsToEncode.empty()) {
+        outImageFormat = useLosslessImage(quality) ? "PNG" : "JPG";
+        errorMessage.clear();
+        return true;
+    }
+
+    outResults.resize(rectsToEncode.size());
+    if (rectsToEncode.size() < MIN_RECTS_FOR_PARALLEL_ENCODE) {
+        for (size_t i = 0; i < rectsToEncode.size(); ++i) {
+            std::string imageFormat;
+            EncodedRectResult result = encodeChangedRect(frame, rectsToEncode[i], quality, imageFormat, errorMessage);
+            if (!errorMessage.empty()) {
+                return false;
+            }
+            outImageFormat = imageFormat;
+            outResults[i] = std::move(result);
+        }
+        errorMessage.clear();
+        return true;
+    }
+
+    std::vector<std::future<EncodedRectResult>> futures;
+    futures.reserve(rectsToEncode.size());
+    for (const ChangedRect& rect : rectsToEncode) {
+        futures.push_back(screenProcessingPool().enqueue([&frame, rect, quality]() {
+            std::string imageFormat;
+            std::string localError;
+            EncodedRectResult result = encodeChangedRect(frame, rect, quality, imageFormat, localError);
+            if (!localError.empty()) {
+                throw std::runtime_error(localError);
+            }
+            return result;
+        }));
+    }
+
+    try {
+        for (size_t i = 0; i < futures.size(); ++i) {
+            outResults[i] = futures[i].get();
+        }
+    } catch (const std::exception& ex) {
+        errorMessage = ex.what();
+        return false;
+    }
+
+    outImageFormat = useLosslessImage(quality) ? "PNG" : "JPG";
+    errorMessage.clear();
+    return true;
+}
+
 uint32_t elapsedMsSince(std::chrono::steady_clock::time_point startedAt)
 {
     return static_cast<uint32_t>(
@@ -749,7 +957,7 @@ ScreenStreamStartRequest parseScreenStreamRequest(const ByteBuffer& payload)
     return request;
 }
 
-StreamControlEvent waitForStreamControlOrTimeout(SOCKET clientSock, std::chrono::milliseconds timeout)
+StreamControlResult waitForStreamControlOrTimeout(SOCKET clientSock, std::chrono::milliseconds timeout)
 {
     fd_set readSet;
     FD_ZERO(&readSet);
@@ -761,23 +969,36 @@ StreamControlEvent waitForStreamControlOrTimeout(SOCKET clientSock, std::chrono:
 
     const int ready = select(0, &readSet, nullptr, nullptr, &waitTime);
     if (ready <= 0) {
-        return StreamControlEvent::None;
+        return {};
     }
 
     ParsedPacket packet{};
     if (!recvPacket(clientSock, packet)) {
-        return StreamControlEvent::Stop;
+        return {StreamControlEvent::Stop, 0};
     }
 
     if (packet.header.command == CMD::CMD_SCREEN_STREAM_STOP) {
-        return StreamControlEvent::Stop;
+        return {StreamControlEvent::Stop, 0};
     }
 
     if (packet.header.command == CMD::CMD_SCREEN_STREAM_KEYFRAME_REQUEST) {
-        return StreamControlEvent::KeyFrameRequest;
+        return {StreamControlEvent::KeyFrameRequest, 0};
     }
 
-    return StreamControlEvent::None;
+    if (packet.header.command == CMD::CMD_SCREEN_STREAM_FRAME_ACK) {
+        ScreenStreamFrameAck ack{};
+        if (!deserializeScreenStreamFrameAck(packet.payload, ack)) {
+            return {StreamControlEvent::Stop, 0};
+        }
+
+        if (ack.ok == 0) {
+            return {StreamControlEvent::KeyFrameRequest, ack.frameId};
+        }
+
+        return {StreamControlEvent::FrameAck, ack.frameId};
+    }
+
+    return {};
 }
 
 } // namespace
@@ -819,6 +1040,7 @@ bool handleScreenStreamStart(SOCKET clientSock, const ByteBuffer& requestPayload
     uint64_t nextFrameId = 1;
     uint64_t lastKeyFrameImageSize = 0;
     uint32_t previousSendMs = 0;
+    uint32_t previousAckWaitMs = 0;
     bool forceKeyFrame = false;
 
     while (true) {
@@ -841,7 +1063,7 @@ bool handleScreenStreamStart(SOCKET clientSock, const ByteBuffer& requestPayload
         stageStartedAt = std::chrono::steady_clock::now();
         std::vector<ChangedRect> changedRects = sendKeyFrame
             ? std::vector<ChangedRect>{{0, 0, currentFrame.captureWidth, currentFrame.captureHeight}}
-            : findChangedBlocks(previousFrame, currentFrame);
+            : findChangedBlocksParallel(previousFrame, currentFrame);
         if (!sendKeyFrame) {
             changedRects = mergeChangedBlocks(changedRects);
             changedRects = chooseDeltaRects(changedRects, currentFrame);
@@ -862,34 +1084,28 @@ bool handleScreenStreamStart(SOCKET clientSock, const ByteBuffer& requestPayload
 
         stageStartedAt = std::chrono::steady_clock::now();
         std::vector<ScreenStreamRect> streamRects;
-        for (const ChangedRect& changedRect : changedRects) {
-            if (changedRect.width == 0 || changedRect.height == 0) {
-                continue;
-            }
+        std::vector<EncodedRectResult> encodedRects;
+        if (!encodeChangedRectsParallel(
+                currentFrame,
+                changedRects,
+                request.quality,
+                encodedRects,
+                imageFormat,
+                errorMessage
+            )) {
+            return sendPacket(clientSock, CMD::CMD_ERROR, errorMessage);
+        }
 
-            const ByteBuffer rectPixels = copyRectPixels(currentFrame, changedRect);
-            ByteBuffer rectImage;
-
-            if (!encodePixelsToScreenImage(
-                    rectPixels,
-                    changedRect.width,
-                    changedRect.height,
-                    request.quality,
-                    rectImage,
-                    imageFormat,
-                    errorMessage
-                )) {
-                return sendPacket(clientSock, CMD::CMD_ERROR, errorMessage);
-            }
-
+        streamRects.reserve(encodedRects.size());
+        for (const EncodedRectResult& encodedRect : encodedRects) {
             streamRects.push_back({
-                changedRect.x,
-                changedRect.y,
-                changedRect.width,
-                changedRect.height,
-                static_cast<uint64_t>(rectImage.size())
+                encodedRect.rect.x,
+                encodedRect.rect.y,
+                encodedRect.rect.width,
+                encodedRect.rect.height,
+                static_cast<uint64_t>(encodedRect.image.size())
             });
-            image.insert(image.end(), rectImage.begin(), rectImage.end());
+            image.insert(image.end(), encodedRect.image.begin(), encodedRect.image.end());
         }
         timing.encodeMs = elapsedMsSince(stageStartedAt);
 
@@ -920,6 +1136,7 @@ bool handleScreenStreamStart(SOCKET clientSock, const ByteBuffer& requestPayload
         frameHeader.compareMs = timing.compareMs;
         frameHeader.encodeMs = timing.encodeMs;
         frameHeader.sendMs = previousSendMs;
+        frameHeader.ackWaitMs = previousAckWaitMs;
         frameHeader.fallbackToKeyFrame = fallbackToKeyFrame ? 1u : 0u;
         frameHeader.rects = std::move(streamRects);
         frameHeader.imageFormat = imageFormat.empty() ? "JPG" : imageFormat;
@@ -940,6 +1157,27 @@ bool handleScreenStreamStart(SOCKET clientSock, const ByteBuffer& requestPayload
         timing.sendMs = elapsedMsSince(stageStartedAt);
         previousSendMs = timing.sendMs;
 
+        stageStartedAt = std::chrono::steady_clock::now();
+        const StreamControlResult ackResult = waitForStreamControlOrTimeout(
+            clientSock,
+            std::chrono::milliseconds(FRAME_ACK_TIMEOUT_MS)
+        );
+        timing.ackWaitMs = elapsedMsSince(stageStartedAt);
+        previousAckWaitMs = timing.ackWaitMs;
+        if (ackResult.event == StreamControlEvent::Stop) {
+            return true;
+        }
+        if (ackResult.event == StreamControlEvent::KeyFrameRequest) {
+            previousFrame = {};
+            previousFrameId = 0;
+            ++nextFrameId;
+            forceKeyFrame = true;
+            continue;
+        }
+        if (ackResult.event != StreamControlEvent::FrameAck || ackResult.frameId != nextFrameId) {
+            return false;
+        }
+
         std::swap(previousFrame, currentFrame);
         previousFrameId = nextFrameId;
         ++nextFrameId;
@@ -948,24 +1186,24 @@ bool handleScreenStreamStart(SOCKET clientSock, const ByteBuffer& requestPayload
         const auto frameInterval = std::chrono::milliseconds(intervalMs);
         const auto elapsed = std::chrono::steady_clock::now() - frameStartedAt;
         if (elapsed < frameInterval) {
-            const StreamControlEvent event = waitForStreamControlOrTimeout(
+            const StreamControlResult result = waitForStreamControlOrTimeout(
                     clientSock,
                     std::chrono::duration_cast<std::chrono::milliseconds>(frameInterval - elapsed)
                 );
-            if (event == StreamControlEvent::Stop) {
+            if (result.event == StreamControlEvent::Stop) {
                 return true;
             }
-            if (event == StreamControlEvent::KeyFrameRequest) {
+            if (result.event == StreamControlEvent::KeyFrameRequest) {
                 forceKeyFrame = true;
             }
             continue;
         }
 
-        const StreamControlEvent event = waitForStreamControlOrTimeout(clientSock, std::chrono::milliseconds(0));
-        if (event == StreamControlEvent::Stop) {
+        const StreamControlResult result = waitForStreamControlOrTimeout(clientSock, std::chrono::milliseconds(0));
+        if (result.event == StreamControlEvent::Stop) {
             return true;
         }
-        if (event == StreamControlEvent::KeyFrameRequest) {
+        if (result.event == StreamControlEvent::KeyFrameRequest) {
             forceKeyFrame = true;
         }
     }
